@@ -1,7 +1,10 @@
 import argparse
-from flask import Flask, request, render_template_string
 import math
-from state import get_position, set_position
+from flask import Flask, request, render_template_string
+from easycomm_server import start_server
+import threading
+
+from state import get_position, set_position, get_config
 from pelco_commands import (
     nudge_elevation,
     set_horizon,
@@ -56,6 +59,9 @@ def web_control():
                 status = "Invalid input. Please enter numeric values."
 
     az, el = get_position()
+    az_speed = get_config("AZIMUTH_SPEED_DPS")
+    el_speed = get_config("ELEVATION_SPEED_DPS")
+
     return render_template_string(
         PAGE,
         az=az,
@@ -66,6 +72,8 @@ def web_control():
         cos=math.cos,
         sin=math.sin,
         radians=math.radians,
+        az_speed=az_speed,
+        el_speed=el_speed,
     )
 
 def main():
@@ -73,7 +81,13 @@ def main():
     parser.add_argument("--port", required=True, help="Serial port, e.g., COM15")
     parser.add_argument("--baud", default=2400, type=int, help="Baud rate")
     args = parser.parse_args()
+
     init_serial(args.port, args.baud)
+
+    # Start TCP server for Gpredict
+    threading.Thread(target=start_server, daemon=True).start()
+
+    # Start Flask app
     app.run(debug=True, use_reloader=False)
 
 if __name__ == "__main__":

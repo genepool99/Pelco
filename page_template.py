@@ -18,6 +18,7 @@ PAGE = """
 </form>
 <p><strong>Status:</strong> {{msg}}</p>
 <p>Current Position: AZ={{caz}} EL={{cel}}</p>
+<p><strong>Calibrated Speed:</strong> AZ={{az_speed}}&deg;/sec, EL={{el_speed}}&deg;/sec</p>
 <div style="display: flex; gap: 40px; margin-top: 20px;">
   <div style="width: 300px; height: 300px; border: 1px solid black; border-radius: 50%; position: relative;">
     <svg width="300" height="300">
