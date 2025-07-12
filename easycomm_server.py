@@ -1,13 +1,27 @@
+"""TCP server for Gpredict control using EasyComm and Hamlib-style commands.
+
+This module listens for connections from satellite tracking software such as
+Gpredict and processes incoming commands to control a Pelco-D rotor.
+"""
+
 import socket
 import threading
+import logging
 from state import get_position
 from pelco_commands import send_command
 
 HOST = '0.0.0.0'
 PORT = 4533  # Default port used by Gpredict
 
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
+
+
 def handle_client(conn, addr):
-    print(f"[Gpredict] Connected: {addr}")
+    """Handle a single client connection and process rotor commands."""
+    logging.info("[Gpredict] Connected: %s", addr)
     try:
         with conn:
             buffer = ""
@@ -15,11 +29,16 @@ def handle_client(conn, addr):
                 data = conn.recv(1024)
                 if not data:
                     break
-                buffer += data.decode()
+                try:
+                    buffer += data.decode()
+                except UnicodeDecodeError:
+                    logging.warning("[Gpredict] Received undecodable data")
+                    continue
+
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
                     cmd = line.strip()
-                    print(f"[Gpredict] Received: {cmd}")
+                    logging.debug("[Gpredict] Received: %s", cmd)
 
                     parts = cmd.split()
                     if not parts:
@@ -32,7 +51,7 @@ def handle_client(conn, addr):
                             el = float(parts[2])
                             send_command(az, el)
                         except ValueError:
-                            print("[WARN] Invalid numeric values")
+                            logging.warning("[Gpredict] Invalid numeric values")
 
                     # Hamlib style: 'p' = get position
                     elif parts[0] == "p":
@@ -46,20 +65,21 @@ def handle_client(conn, addr):
                             el = float(parts[2])
                             send_command(az, el)
                         except ValueError:
-                            print("[WARN] Invalid AZEL values")
+                            logging.warning("[Gpredict] Invalid AZEL values")
 
                     else:
-                        print("[DEBUG] Unhandled command:", cmd)
+                        logging.debug("[Gpredict] Unhandled command: %s", cmd)
 
-    except Exception as e:
-        print(f"[Gpredict] Connection error: {e}")
+    except (ConnectionError, OSError) as e:
+        logging.error("[Gpredict] Connection error: %s", e)
 
 
 def start_server():
+    """Start the EasyComm-compatible TCP server for Gpredict."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
     server.listen(1)
-    print(f"[Gpredict] EasyComm server listening on {HOST}:{PORT}")
+    logging.info("[Gpredict] EasyComm server listening on %s:%d", HOST, PORT)
     while True:
         conn, addr = server.accept()
         threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()

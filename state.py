@@ -1,78 +1,90 @@
-"""
-Shared state management for rotor control.
-Handles position tracking, serial connection, and config persistence.
-"""
+"""Shared state and configuration management for Pelco-D rotor control."""
 
 import json
 import os
+import logging
 from threading import Lock
 
 DEVICE_ADDRESS = 1
 
-_position = [0.0, 0.0]  # [azimuth, elevation]
-_serial_port_instance = None
-lock = Lock()
-
-CONFIG_FILE = "config.json"
-DEFAULT_CONFIG = {
+_POSITION = [0.0, 0.0]  # [azimuth, elevation]
+_SERIAL_PORT = None
+_CONFIG_FILE = "config.json"
+_DEFAULT_CONFIG = {
     "AZIMUTH_SPEED_DPS": 6.0,
     "ELEVATION_SPEED_DPS": 4.0
 }
-_config = DEFAULT_CONFIG.copy()
+_CONFIG = _DEFAULT_CONFIG.copy()
+
+lock = Lock()
+
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
 
 
 # --- Serial Port Management ---
 def set_serial_port(port):
-    global _serial_port_instance
-    _serial_port_instance = port
+    """Store the serial port instance globally."""
+    global _SERIAL_PORT
+    _SERIAL_PORT = port
 
 
 def get_serial_port():
-    return _serial_port_instance
+    """Return the currently set serial port instance."""
+    return _SERIAL_PORT
 
 
 # --- Position Management ---
 def set_position(az, el):
-    global _position
-    _position = [float(az), float(el)]
+    """Update the current azimuth and elevation position."""
+    _POSITION[0] = float(az)
+    _POSITION[1] = float(el)
 
 
 def get_position():
-    return _position.copy()
+    """Get a copy of the current azimuth and elevation position."""
+    return _POSITION.copy()
 
 
 def reset_position():
+    """Reset the internal position to azimuth=0, elevation=0."""
     set_position(0.0, 0.0)
 
 
 # --- Config Management ---
 def load_config():
-    global _config
-    if os.path.exists(CONFIG_FILE):
+    """Load configuration from disk if available."""
+    if os.path.exists(_CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r') as f:
-                _config.update(json.load(f))
-        except Exception as e:
-            print(f"[WARN] Failed to load config: {e}")
+            with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                loaded = json.load(f)
+                _CONFIG.update(loaded)
+        except (OSError, ValueError) as e:
+            logging.warning("Failed to load config: %s", e)
 
 
 def save_config():
+    """Persist current configuration values to disk."""
     try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(_config, f, indent=2)
-        print("[INFO] Config saved.")
-    except Exception as e:
-        print(f"[ERROR] Failed to save config: {e}")
+        with open(_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(_CONFIG, f, indent=2)
+        logging.info("Config saved.")
+    except OSError as e:
+        logging.error("Failed to save config: %s", e)
 
 
 def get_config(key):
-    return _config.get(key, DEFAULT_CONFIG.get(key))
+    """Retrieve a config value or default if not set."""
+    return _CONFIG.get(key, _DEFAULT_CONFIG.get(key))
 
 
 def set_config(key, value):
-    _config[key] = value
+    """Update a configuration key and persist it."""
+    _CONFIG[key] = value
     save_config()
 
 
-# Load config on import
+# Load config when module is imported
 load_config()

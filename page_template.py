@@ -1,4 +1,19 @@
-# page_template.py
+"""
+HTML page template for the Pelco-D Web Debug Interface.
+
+This template provides an interactive form to:
+- Send absolute azimuth and elevation values
+- Reset position
+- Calibrate the rotor
+- Nudge elevation up/down
+- Set elevation to 0 (horizon)
+- Run a basic movement demo
+
+It also visualizes:
+- Azimuth as a radial line on a circle
+- Elevation as a vertical bar
+"""
+
 PAGE = """
 <!doctype html>
 <title>Pelco-D Web Control</title>
@@ -19,17 +34,22 @@ PAGE = """
 <p><strong>Status:</strong> {{msg}}</p>
 <p>Current Position: AZ={{caz}} EL={{cel}}</p>
 <p><strong>Calibrated Speed:</strong> AZ={{az_speed}}&deg;/sec, EL={{el_speed}}&deg;/sec</p>
+
 <div style="display: flex; gap: 40px; margin-top: 20px;">
+  <!-- Azimuth Circle -->
   <div style="width: 300px; height: 300px; border: 1px solid black; border-radius: 50%; position: relative;">
     <svg width="300" height="300">
       <line x1="150" y1="150" x2="{{ 150 + 100 * cos(radians(caz)) }}" y2="{{ 150 - 100 * sin(radians(caz)) }}" stroke="red" stroke-width="2" />
       <circle cx="150" cy="150" r="3" fill="black" />
+      <text x="145" y="25" font-size="12" fill="black">North (0°)</text>
     </svg>
     <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 12px;">Azimuth</div>
   </div>
 
+  <!-- Elevation Bar -->
   <div style="width: 50px; height: 300px; border: 1px solid black; position: relative;">
     <div style="position: absolute; bottom: 0; left: 0; width: 100%; height: {{ (cel + 45) / 90 * 100 }}%; background-color: lightblue;"></div>
+    <div style="position: absolute; top: 50%; width: 100%; text-align: center; font-size: 12px; transform: translateY(-50%);">0°</div>
     <div style="position: absolute; bottom: 0; width: 100%; text-align: center; font-size: 12px;">Elevation</div>
   </div>
 </div>
