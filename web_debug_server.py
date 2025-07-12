@@ -36,10 +36,10 @@ def web_control():
             status = nudge_elevation(-1, duration=0.15)
 
         elif "nudge_up_big" in form:
-            status = nudge_elevation(1, duration=0.6)
+            status = nudge_elevation(1, duration=1)
 
         elif "nudge_down_big" in form:
-            status = nudge_elevation(-1, duration=0.6)
+            status = nudge_elevation(-1, duration=1)
 
         elif "set_horizon" in form:
             status = set_horizon()

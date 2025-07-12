@@ -1,28 +1,31 @@
-import serial
+# pelco_commands.py
+"""
+Control functions for a Pelco-D based rotor system.
+"""
 import time
-import threading
+import serial
 
 from state import (
     lock,
     DEVICE_ADDRESS,
     get_position,
     set_position,
-    AZ_MIN,
-    AZ_MAX,
-    EL_MIN,
-    EL_MAX,
+    get_serial_port,
+    set_serial_port,
 )
 
-# Global serial instance
-ser = None
 
 def init_serial(port, baudrate):
-    global ser
+    """Initialize and store the shared serial connection."""
     ser = serial.Serial(port=port, baudrate=baudrate, timeout=1)
-    print(f"[DEBUG] Serial initialized on {port} at {baudrate} bps")
+    set_serial_port(ser)
+
 
 def send_pelco_d(cmd1, cmd2, data1, data2=0x00):
-    global ser
+    """Send a PELCO-D command packet."""
+    ser = get_serial_port()
+    if not ser:
+        raise RuntimeError("Serial port not initialized")
     with lock:
         msg = bytearray([
             0xFF,  # sync byte
@@ -37,38 +40,16 @@ def send_pelco_d(cmd1, cmd2, data1, data2=0x00):
         print(f"[DEBUG] Sent PELCO-D: {[hex(b) for b in msg]}")
         time.sleep(0.05)
 
+
 def stop():
-    print("[DEBUG] Sending stop command")
+    """Send a stop command to halt all movement."""
     send_pelco_d(0x00, 0x00, 0x00, 0x00)
 
-def nudge_elevation(direction, duration=0.2):
-    if direction not in (-1, 1):
-        return "Invalid direction"
 
-    cmd1 = 0x00
-    cmd2 = 0x08 if direction > 0 else 0x10
-
-    print(f"[DEBUG] Sending nudge: direction={direction}, duration={duration}s")
-    send_pelco_d(cmd1, cmd2, 0x20, 0x20)
-    time.sleep(duration)
-    stop()
-
-    az, el = get_position()
-    step = direction * (duration * 10)  # adjustable scaling factor
-    new_el = max(EL_MIN, min(EL_MAX, el + step))
-    print(f"[DEBUG] Nudged elevation from {el} to {new_el} (step={step})")
-    set_position(az, new_el)
-    return f"Nudged elevation to {new_el}" 
-
-def set_horizon():
-    az, _ = get_position()
-    print("[DEBUG] Setting elevation to horizon (0 degrees)")
-    set_position(az, 0)
-    return send_command(az, 0)
-
-def send_command(az, el, duration=0):
-    az = max(AZ_MIN, min(AZ_MAX, int(az)))
-    el = max(EL_MIN, min(EL_MAX, int(el)))
+def send_command(az, el):
+    """Send a movement command toward the target azimuth/elevation."""
+    az = max(0, min(359, int(az)))
+    el = max(-45, min(45, int(el)))
 
     pan_speed = 0x20
     tilt_speed = 0x20
@@ -76,38 +57,72 @@ def send_command(az, el, duration=0):
     cmd1 = 0x00
     cmd2 = 0x00
 
-    current_az, current_el = get_position()
-
-    print(f"[DEBUG] Moving from az={current_az}, el={current_el} to az={az}, el={el}")
-
-    if az > current_az:
+    if az > 0:
         cmd2 |= 0x02  # Right
-    elif az < current_az:
+    elif az < 0:
         cmd2 |= 0x04  # Left
 
-    if el > current_el:
+    if el > 0:
         cmd2 |= 0x08  # Up
-    elif el < current_el:
+    elif el < 0:
         cmd2 |= 0x10  # Down
 
+    print(f"[DEBUG] Moving from az={get_position()[0]}, el={get_position()[1]} to az={az}, el={el}")
     send_pelco_d(cmd1, cmd2, pan_speed, tilt_speed)
-    if duration > 0:
-        time.sleep(duration)
-        stop()
-
     set_position(az, el)
     return f"Command sent to move to az={az}, el={el}"
 
+
+def nudge_elevation(direction, duration):
+    """Adjust elevation briefly in a direction (+1 for up, -1 for down) for a fixed duration."""
+    if direction not in (-1, 1):
+        return "Invalid direction"
+
+    cmd1 = 0x00
+    cmd2 = 0x08 if direction > 0 else 0x10  # Up or Down
+    pan_speed = 0x00
+    tilt_speed = 0x20
+
+    print(f"[DEBUG] Nudging elevation {'up' if direction > 0 else 'down'} for {duration}s")
+    send_pelco_d(cmd1, cmd2, pan_speed, tilt_speed)
+    time.sleep(duration)
+    stop()
+    return f"Nudged elevation {'up' if direction > 0 else 'down'} for {duration} seconds"
+
+
+
+def set_horizon():
+    """Move the elevation to 0 while maintaining azimuth."""
+    az, _ = get_position()
+    set_position(az, 0)
+    return send_command(az, 0)
+
+
 def calibrate():
-    print("[DEBUG] Calibrating to az=0, el=0")
+    """
+    Automatically calibrate azimuth by rotating fully left to stop,
+    then prompt user to manually align to true north and level the elevation.
+    Sets internal position to (0, 0).
+    """
+    print("[INFO] Calibration starting: rotating all the way left to find stop.")
+    send_pelco_d(0x00, 0x04, 0x20, 0x00)  # Command: Turn Left at moderate speed
+    time.sleep(40)  # Adjust based on your hardware’s full left rotation time
+    stop()
+    print("[INFO] Please manually rotate to TRUE NORTH (geographic) and level the elevation.")
     set_position(0, 0)
-    return "Calibrated to 0,0"
+    return "Azimuth stop reached. Device set to az=0, el=0. Please ensure it's pointed true north and leveled."
+
+def timed_move(cmd2, duration=4):
+    send_pelco_d(0x00, cmd2, 0x20, 0x20)
+    time.sleep(duration)
+    stop()
 
 def run_demo_sequence():
-    steps = [(0, 0), (90, 0), (180, 0), (270, 0), (0, 45), (0, -45), (0, 0)]
-    print("[DEBUG] Starting demo sequence")
-    for az, el in steps:
-        print(f"[DEBUG] Demo step: az={az}, el={el}")
-        send_command(az, el)
-        time.sleep(1)
-    return "Demo sequence complete"
+    """Fast demo with visible rotor movement."""
+    timed_move(0x02, 0.5)  # Right
+    timed_move(0x04, 0.5)  # Left
+    timed_move(0x02, 0.3)
+    timed_move(0x04, 0.3)
+    timed_move(0x08, 0.3)  # Up
+    timed_move(0x10, 0.3)  # Down
+    return "Fast visible demo complete"

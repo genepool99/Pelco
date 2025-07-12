@@ -1,52 +1,39 @@
-import threading
-import json
+"""
+Shared state management for rotor control.
+Handles position tracking and the serial connection.
+"""
 
-# Lock for thread safety
-lock = threading.Lock()
+from threading import Lock
 
-# Shared serial handle and device address
-DEVICE_ADDRESS = 0x01
-ser = None
+DEVICE_ADDRESS = 1
 
-# Load limits from JSON
-LIMITS_PATH = "limits.json"
-with open(LIMITS_PATH, "r") as f:
-    limits = json.load(f)
+_position = [0, 0]  # [azimuth, elevation]
+_serial_port_instance = None
+lock = Lock()
 
-AZ_MIN = limits.get("az_min", 0)
-AZ_MAX = limits.get("az_max", 359)
-EL_MIN = limits.get("el_min", -45)
-EL_MAX = limits.get("el_max", 45)
 
-# Internal position state
-_position = {
-    "az": 0.0,
-    "el": 0.0,
-    "target_az": 0.0,
-    "target_el": 0.0,
-}
+def set_serial_port(port):
+    """Store the initialized serial port object."""
+    global _serial_port_instance
+    _serial_port_instance = port
 
-def get_position(target=False):
-    with lock:
-        if target:
-            return _position["target_az"], _position["target_el"]
-        else:
-            return _position["az"], _position["el"]
+
+def get_serial_port():
+    """Return the current serial port instance."""
+    return _serial_port_instance
+
 
 def set_position(az, el):
-    with lock:
-        _position["az"] = az
-        _position["el"] = el
+    """Set the internal azimuth and elevation position."""
+    global _position
+    _position = [az, el]
 
-def update_position(az=None, el=None, target=False):
-    with lock:
-        if target:
-            if az is not None:
-                _position["target_az"] = az
-            if el is not None:
-                _position["target_el"] = el
-        else:
-            if az is not None:
-                _position["az"] = az
-            if el is not None:
-                _position["el"] = el
+
+def get_position():
+    """Return the current [azimuth, elevation] as a list."""
+    return _position.copy()
+
+
+def reset_position():
+    """Reset the position to 0, 0."""
+    set_position(0, 0)
