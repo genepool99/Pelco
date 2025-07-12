@@ -34,7 +34,7 @@ HTML_PAGE = """
 <!doctype html>
 <html>
 <head>
-  <title>Peltrack Web Control</title>
+  <title>Peltrack</title>
   <meta name="description" content="Peltrack: Pelco-D rotor controller web interface">
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
@@ -42,15 +42,24 @@ HTML_PAGE = """
     input { width: 80px; }
     button { margin: 4px; padding: 5px 10px; }
     .panel { display: flex; gap: 40px; margin-top: 20px; align-items: center; }
-    .azimuth, .elevation { position: relative; }
     .azimuth {
       width: 300px; height: 300px;
       border: 1px solid black;
       border-radius: 50%;
+      position: relative;
+    }
+    .azimuth-label {
+      position: absolute;
+      top: 135px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-weight: bold;
+      font-size: 16px;
     }
     .elevation {
       width: 50px; height: 300px;
       border: 1px solid black;
+      position: relative;
     }
     .elevation-fill {
       position: absolute;
@@ -58,17 +67,21 @@ HTML_PAGE = """
       width: 100%;
       background-color: lightblue;
     }
-    .label {
+    .elevation-scale {
       position: absolute;
+      top: 0;
+      left: 55px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .elevation-scale span {
+      font-size: 10px;
+    }
+    .label {
       font-size: 12px;
       text-align: center;
-      width: 100%;
-    }
-    .north-label {
-      top: 5px; left: 0;
-    }
-    .elevation-label {
-      bottom: -20px;
     }
     .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
     .group { display: flex; flex-direction: column; gap: 4px; margin-right: 20px; }
@@ -104,15 +117,25 @@ HTML_PAGE = """
   <div class="panel">
     <div class="azimuth">
       <svg width="300" height="300">
+        <circle cx="150" cy="150" r="145" fill="none" stroke="#ccc" stroke-width="1"/>
         <line id="az-line" x1="150" y1="150" x2="150" y2="50" stroke="red" stroke-width="2" />
         <circle cx="150" cy="150" r="3" fill="black" />
       </svg>
-      <div class="label north-label">North (0°)</div>
+      <div class="azimuth-label">AZ: <span id="az-display">{{caz}}</span>°</div>
     </div>
 
     <div class="elevation">
       <div id="el-fill" class="elevation-fill" style="height: 0%"></div>
-      <div class="label elevation-label">Elevation</div>
+      <div class="elevation-scale">
+        <span>+45°</span>
+        <span>+30°</span>
+        <span>+15°</span>
+        <span>  0°</span>
+        <span>-15°</span>
+        <span>-30°</span>
+        <span>-45°</span>
+      </div>
+      <div class="label">EL: <span id="el-display">{{cel}}</span>°</div>
     </div>
   </div>
 
@@ -135,12 +158,14 @@ HTML_PAGE = """
       document.getElementById("az-line").setAttribute("x2", x);
       document.getElementById("az-line").setAttribute("y2", y);
       document.getElementById("az").textContent = angle.toFixed(1);
+      document.getElementById("az-display").textContent = angle.toFixed(1);
     }
 
     function updateElevation(el) {
       const elPct = Math.min(1, Math.max(0, (el + 45) / 90));
       document.getElementById("el-fill").style.height = (elPct * 100) + "%";
       document.getElementById("el").textContent = el.toFixed(1);
+      document.getElementById("el-display").textContent = el.toFixed(1);
     }
 
     socket.on("position", function (data) {
