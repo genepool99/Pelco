@@ -1,33 +1,51 @@
 # Peltrack
+
 ## A Pelco-D Rotor Controller with Web Interface for Ham Radio Operators
 
-This project provides a Python-based controller for an antenna rotator using the Pelco-D protocol. It includes:
+This project provides a Python-based controller for antenna rotators using the Pelco-D protocol. It includes:
 - A calibration tool
-- A web-based control interface
-- A TCP server compatible with Gpredict (`rotctld` or EasyComm-like) for satellite tracking
+- A web-based debug/control interface
+- A TCP server compatible with **Gpredict** (via EasyComm / Hamlib)
+- Live UI updates when controlled externally (e.g., by Gpredict)
 
 ---
 
 ## 🎞️ Features
 
-- Serial communication with a Pelco-D compatible pan/tilt unit
-- Interactive web UI for testing and sending commands
-- Command-line calibration mode
-- TCP server for integration with **Gpredict**
+- Serial communication with Pelco-D compatible pan/tilt rotors
+- Web UI with real-time position feedback and visualizer
+- TCP server for satellite tracking via **Gpredict**
+- Calibration tool to measure rotor speed (°/sec)
+- Supports full elevation + azimuth movement
+- Accurate state persistence across manual + automated control
 
 ---
 
 ## 🔧 Requirements
 
 - Python 3.10+
-- A Pelco-D compatible rotator (via RS-485)
+- Pelco-D compatible rotator (via RS-485)
 - USB–RS485 adapter (e.g., CH340, FTDI)
-- Flask (for the web UI)
+- `requirements.txt` dependencies
 
 ### Install Dependencies
 
 ```bash
-pip install flask
+python -m venv venv
+venv\Scripts\activate             # Windows
+# OR
+source venv/bin/activate         # macOS/Linux
+
+pip install -r requirements.txt
+```
+
+Your `requirements.txt` should include:
+
+```
+flask
+flask-socketio
+eventlet
+pyserial
 ```
 
 ---
@@ -36,108 +54,114 @@ pip install flask
 
 ### 1. Calibrate the Rotor
 
-Accurate rotor control requires knowing how fast your Pelco-D unit moves in **degrees per second**. The calibration tool determines this automatically.
+Accurate rotor control requires knowing your rotor’s **degrees per second** speed.
 
 #### Initial Setup
-- Connect your rotator via RS-485 and power it on.
-- Verify your USB–RS485 adapter is connected (e.g., `COM4` on Windows).
-- Manually rotate the azimuth to its **leftmost stop**, then turn it right to face **true North**.
-- Level the elevation so it's flat (0°).
-- This becomes your **zero reference position**: Azimuth = 0°, Elevation = 0°.
 
-#### Run the Tool
+- Connect your rotator via RS-485 and power it on.
+- Rotate azimuth to its **leftmost mechanical stop**, then **center it facing true North**.
+- Level the tilt to 0° elevation (horizontal).
+- This becomes your reference: **Az = 0°, El = 0°**.
+
+#### Run Calibration
 
 ```bash
 python calibrate.py
 ```
 
-You will:
-1. Enter your serial port (e.g., `COM4`) and optional baud rate.
-2. Let the motor move for 10 seconds during each test.
-3. Measure how far it turned and input the degrees moved.
-
-The script will:
-- Calculate **azimuth and elevation speed** (°/sec)
-- Save the result to `config.json`
+- Follow the prompts.
+- The tool measures speed by rotating for 10 seconds.
+- You enter how far it turned.
+- Results are saved in `config.json`.
 
 ---
 
 ### 2. Start the Web + Gpredict Server
 
 ```bash
-python pelco_web.py --port COM4 --baud 2400
+python peltrack.py --port COM4 --baud 2400
 ```
 
-- Web UI: [http://localhost:5000](http://localhost:5000)
-- Gpredict TCP server: Port `4533`  
-  Supports both **EasyComm** and **Hamlib-style** `P az el` commands.
+This starts:
+
+- ✅ Web UI on [http://localhost:5000](http://localhost:5000)
+- ✅ Gpredict-compatible TCP server on port **4533**
+
+Gpredict can now command rotor movement — the Web UI updates live.
 
 ---
 
 ## 🌐 Web Interface
 
+Features:
 - View current azimuth and elevation
-- Send absolute positions
-- Nudge elevation up/down
-- Run a test demo
-- Reset or re-calibrate
+- Absolute move commands
+- Elevation nudges (↑/↓)
+- Set to "horizon" (el=0)
+- Visual dial + bar graph
+- "Run Demo" simulates satellite pass
+- Live updates if rotor is moved externally (e.g. by Gpredict)
 
 ---
 
 ## 🛁 Gpredict Setup
 
-1. Open Gpredict Preferences → Interfaces → Rotator.
+1. Open Gpredict Preferences → Interfaces → Rotator
 2. Add a new interface:
    - **Hostname**: `localhost`
    - **Port**: `4533`
    - **Protocol**: `Hamlib rotctld` or `EasyComm II`
-3. Enable the rotator interface during satellite tracking.
+3. Enable rotator interface during satellite passes.
+
+Test by using Gpredict’s elevation/azimuth sliders or auto-tracking.
 
 ---
 
 ## 📜 Resetting / Re-Zeroing
 
-If the rotor is moved manually or drifts out of alignment:
+If the rotor is bumped, moved manually, or drifts:
 
-- Use the web UI’s **“Reset Position”** button to set internal tracking to AZ=0, EL=0.
-- Or reset from code:
+- Use the Web UI’s **"Reset Position"** to mark current position as 0/0
+- Or from Python:
 
 ```python
 from state import reset_position
 reset_position()
 ```
 
-You may also re-run the calibration script at any time.
+You can also **re-run the calibration script** at any time.
 
 ---
 
-## 📍 Notes
+## 🔁 Live Sync with Gpredict
 
-- Re-calibration is only needed if motor speed changes (due to hardware differences or wear).
-- Always manually re-zero if the mount is physically adjusted.
-- Accurate calibration ensures precise satellite tracking and rotator control.
+When Gpredict sends new commands, the Web UI **automatically updates** in real-time to reflect the current position.
+
+No page refresh needed — uses `Flask-SocketIO` + `eventlet`.
 
 ---
 
 ## 🧪 Tested With
 
-- Windows 11+ Python 3.11
+- Windows 11 + Python 3.11
 - CH340 USB–RS485 adapter
-- [Gpredict 2.3](https://gpredict.oz9aec.net/) & [SkyRoof 1.15 Beta](https://skyroof.org/)
-
+- [Gpredict 2.3](https://gpredict.oz9aec.net/)
+- [SkyRoof 1.15 Beta](https://skyroof.org/)
 
 ---
 
 ## 📁 Project Structure
 
 ```
-├── pelco_commands.py       # Core rotor logic
-├── state.py                # Shared state and config management
-├── pelco_web.py            # Flask app + TCP control server
-├── easycomm_server.py      # TCP server for Gpredict (EasyComm/Hamlib)
-├── calibrate.py            # CLI-based rotor calibration tool
-├── page_template.py        # HTML for control interface
-├── config.json             # Saved calibration values
+peltrack/
+├── calibrate.py           # CLI calibration tool
+├── config.json            # Saved calibration data
+├── easycomm_server.py     # TCP server for Gpredict
+├── page_template.py       # Web UI HTML template
+├── pelco_commands.py      # Rotor control logic
+├── peltrack.py            # Flask + TCP bridge
+├── requirements.txt       # Dependencies
+├── state.py               # Shared config/state
 ```
 
 ---
@@ -150,4 +174,4 @@ MIT License. Use at your own risk.
 
 ## 🚀 Credits
 
-2025 - Avi Solomon (AE7ET) 
+2025 — Avi Solomon (AE7ET)

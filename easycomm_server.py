@@ -74,7 +74,7 @@ def handle_client(conn, addr):
         logging.error("[Gpredict] Connection error: %s", e)
 
 
-def start_server():
+def start_server(host='0.0.0.0', port=4533, update_callback=None):
     """Start the EasyComm-compatible TCP server for Gpredict."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
