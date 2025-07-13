@@ -5,7 +5,7 @@
 This project provides a Python-based controller for antenna rotators using the Pelco-D protocol. It includes:
 - A calibration tool
 - A web-based debug/control interface
-- A TCP server compatible with **Gpredict** (via EasyComm / Hamlib)
+- A TCP server compatible with EasyComm & Hamlib)
 - Live UI updates when controlled externally (e.g., by Gpredict)
 
 ---
@@ -37,15 +37,6 @@ venv\Scripts\activate             # Windows
 source venv/bin/activate         # macOS/Linux
 
 pip install -r requirements.txt
-```
-
-Your `requirements.txt` should include:
-
-```
-flask
-flask-socketio
-eventlet
-pyserial
 ```
 
 ---
@@ -112,8 +103,6 @@ Features:
    - **Port**: `4533`
    - **Protocol**: `Hamlib rotctld` or `EasyComm II`
 3. Enable rotator interface during satellite passes.
-
-Test by using Gpredict’s elevation/azimuth sliders or auto-tracking.
 
 ---
 
