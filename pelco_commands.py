@@ -130,17 +130,59 @@ def set_horizon(update_callback: UpdateCallback = None) -> str:
     az, _ = RotorState.get_position()
     return send_command(az, 90.0, update_callback=update_callback)
 
+def _get_config_with_default(key: str, default: float) -> float:
+    value = RotorState.get_config(key)
+    if value is None:
+        logging.warning("Config '%s' not set. Using default: %s", key, default)
+        return default
+    return value
 
-def calibrate() -> str:
-    """Rotate to mechanical stop and prompt for manual alignment."""
-    logging.info("Calibration: rotating fully left to find mechanical stop.")
-    send_pelco_d(0x00, 0x04, 0x20, 0x00)
-    time.sleep(40)
+def calibrate(update_callback: UpdateCallback = None) -> str:
+    """
+    Calibrate both azimuth and elevation:
+    - Tilt fully down
+    - Tilt up by configured degrees
+    - Rotate azimuth fully left
+    """
+
+    # --- Load timing/config values ---
+    down_time = _get_config_with_default("CALIBRATE_DOWN_DURATION_SEC", 10)
+    up_degrees = _get_config_with_default("CALIBRATE_UP_TRAVEL_DEGREES", 90)
+    el_speed = _get_config_with_default("ELEVATION_SPEED_DPS", 5.0)
+    az_time = _get_config_with_default("CALIBRATE_AZ_LEFT_DURATION_SEC", 40)
+     
+    logging.info("Starting calibration with down_time=%.1f, up_degrees=%d, az_time=%.1f",
+                 down_time, up_degrees, az_time)
+
+    # --- Elevation calibration ---
+    logging.info("Calibration: tilting fully down to find mechanical stop.")
+    send_pelco_d(0x00, 0x10, 0x00, 0x20)  # Down
+    time.sleep(down_time)
     stop()
 
-    logging.info("Now manually rotate to TRUE NORTH and point antenna straight up.")
+    logging.info("Calibration: tilting up ~%d° at %.1f°/s.", up_degrees, el_speed)
+    send_pelco_d(0x00, 0x08, 0x00, 0x20)  # Up
+    time.sleep(up_degrees / el_speed)
+    stop()
+
+    # --- Azimuth calibration ---
+    logging.info("Calibration: rotating azimuth fully left.")
+    send_pelco_d(0x00, 0x04, 0x20, 0x00)  # Left
+    time.sleep(az_time)
+    stop()
+
+    # --- Finalize position ---
     RotorState.set_position(0.0, 90.0)
-    return "✓ Calibration complete! Azimuth set to 0, elevation set to 90° (UP)"
+
+    msg = (
+        "✓ Calibration complete. Azimuth set to 0°, Elevation set to 90°.\n"
+        "Please use the web UI to make fine adjustments if needed."
+    )
+    if update_callback:
+        update_callback(msg)
+
+    return msg
+
 
 
 def test_azimuth_speed(duration: int = 10):
