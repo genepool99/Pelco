@@ -1,5 +1,4 @@
 """Control functions for a Pelco-D based rotor system.
-Includes serial setup, calibrated movement logic, and demo sequencing.
 
 Supports:
 - Manual and programmatic control
@@ -9,8 +8,8 @@ Supports:
 
 import time
 import logging
+from typing import Optional, Callable
 import serial
-
 from state import RotorState, DEVICE_ADDRESS
 
 logging.basicConfig(
@@ -18,17 +17,21 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+UpdateCallback = Optional[Callable[[str], None]]
 
-def init_serial(port, baudrate):
-    """Initialize and open a serial connection to the Pelco-D device."""
+# Adjust these if your mount allows > 90° tilt
+ELEVATION_MIN = 0.0
+ELEVATION_MAX = 90.0
+
+
+def init_serial(port: str, baudrate: int):
+    """Open a serial connection to the Pelco-D device."""
     ser = serial.Serial(port=port, baudrate=baudrate, timeout=1)
     RotorState.set_serial_port(ser)
 
 
-def send_pelco_d(cmd1, cmd2, data1, data2=0x00):
-    """
-    Construct and send a Pelco-D protocol command frame over serial.
-    """
+def send_pelco_d(cmd1: int, cmd2: int, data1: int, data2: int = 0x00):
+    """Send a Pelco-D command frame over serial."""
     ser = RotorState.get_serial_port()
     if not ser:
         raise RuntimeError("Serial port not initialized")
@@ -45,19 +48,21 @@ def send_pelco_d(cmd1, cmd2, data1, data2=0x00):
         ])
         ser.write(msg)
         logging.debug("Sent PELCO-D: %s", [hex(b) for b in msg])
-        time.sleep(0.05)  # allow processing time
+        time.sleep(0.05)
 
 
 def stop():
-    """Send stop command to immediately halt all rotor motion."""
+    """Immediately halt all rotor motion."""
     send_pelco_d(0x00, 0x00, 0x00, 0x00)
 
 
-def send_command(az_target, el_target):
-    """
-    Move the rotor to a target azimuth and elevation.
-    Uses configured speed to calculate estimated duration.
-    """
+def _calculate_motion_time(delta: float, speed: float) -> float:
+    return abs(delta) / speed if delta else 0.0
+
+
+def send_command(az_target: float, el_target: float, update_callback: UpdateCallback = None) -> str:
+    """Move rotor to the target azimuth and elevation."""
+    logging.info("Moving to AZ=%.1f°, EL=%.1f°", az_target, el_target)
     az_current, el_current = RotorState.get_position()
     az_delta = az_target - az_current
     el_delta = el_target - el_current
@@ -65,43 +70,41 @@ def send_command(az_target, el_target):
     az_speed = RotorState.get_config("AZIMUTH_SPEED_DPS")
     el_speed = RotorState.get_config("ELEVATION_SPEED_DPS")
 
-    az_direction = 0x02 if az_delta > 0 else (0x04 if az_delta < 0 else 0)
-    el_direction = 0x08 if el_delta > 0 else (0x10 if el_delta < 0 else 0)
-
-    az_time = abs(az_delta) / az_speed if az_delta else 0
-    el_time = abs(el_delta) / el_speed if el_delta else 0
+    az_time = _calculate_motion_time(az_delta, az_speed)
+    el_time = _calculate_motion_time(el_delta, el_speed)
     move_duration = max(az_time, el_time)
 
     if move_duration == 0:
         return "No movement needed"
 
-    cmd2 = 0x00
-    if az_direction:
-        cmd2 |= az_direction
-    if el_direction:
-        cmd2 |= el_direction
+    cmd2 = 0
+    if az_delta > 0:
+        cmd2 |= 0x02  # Right
+    elif az_delta < 0:
+        cmd2 |= 0x04  # Left
+    if el_delta > 0:
+        cmd2 |= 0x08  # Up
+    elif el_delta < 0:
+        cmd2 |= 0x10  # Down
 
-    logging.debug(
-        "Moving: Δaz=%.1f°, Δel=%.1f°, est. duration=%.2fs",
-        az_delta, el_delta, move_duration
-    )
-
-    send_pelco_d(0x00, cmd2, 0x20, 0x20)  # fixed speed
+    logging.debug("Moving: Δaz=%.1f°, Δel=%.1f°, est. duration=%.2fs",
+                  az_delta, el_delta, move_duration)
+    send_pelco_d(0x00, cmd2, 0x20, 0x20)  # Fixed speed
     time.sleep(move_duration)
     stop()
 
+    # Clamp to limits
+    el_target = max(ELEVATION_MIN, min(ELEVATION_MAX, el_target))
     RotorState.set_position(az_target, el_target)
-    return f"Moved to az={az_target:.1f}, el={el_target:.1f} over ~{move_duration:.1f}s"
+
+    msg = f"Moved to az={az_target:.1f}, el={el_target:.1f} over ~{move_duration:.1f}s"
+    if update_callback:
+        update_callback(msg)
+    return msg
 
 
-def nudge_elevation(direction, duration):
-    """
-    Nudge elevation up or down briefly.
-    
-    Args:
-        direction: +1 for up, -1 for down
-        duration: time in seconds to hold nudge
-    """
+def nudge_elevation(direction: int, duration: float, update_callback: UpdateCallback = None) -> str:
+    """Briefly nudge elevation up or down."""
     if direction not in (-1, 1):
         return "Invalid direction"
 
@@ -111,89 +114,73 @@ def nudge_elevation(direction, duration):
     stop()
 
     az, el = RotorState.get_position()
-    el += direction * RotorState.get_config("ELEVATION_SPEED_DPS") * duration
-    RotorState.set_position(az, max(-45, min(45, el)))
-    return f"Nudged elevation {'up' if direction > 0 else 'down'} for {duration:.1f} seconds"
+    delta = direction * RotorState.get_config("ELEVATION_SPEED_DPS") * duration
+    new_el = el + delta
+    new_el = max(ELEVATION_MIN, min(ELEVATION_MAX, new_el))
+    RotorState.set_position(az, new_el)
+
+    msg = f"Nudged elevation {'up' if direction > 0 else 'down'} for {duration:.1f} seconds"
+    if update_callback:
+        update_callback(msg)
+    return msg
 
 
-def set_horizon():
-    """Return elevation to 0 degrees, preserving current azimuth."""
+def set_horizon(update_callback: UpdateCallback = None) -> str:
+    """Return elevation to 90 degrees (facing straight up), keeping current azimuth."""
     az, _ = RotorState.get_position()
-    return send_command(az, 0.0)
+    return send_command(az, 90.0, update_callback=update_callback)
 
 
-def calibrate():
-    """
-    Calibrate rotor by rotating fully left (mechanical stop),
-    then prompt user to manually align to North and level.
-    """
+def calibrate() -> str:
+    """Rotate to mechanical stop and prompt for manual alignment."""
     logging.info("Calibration: rotating fully left to find mechanical stop.")
     send_pelco_d(0x00, 0x04, 0x20, 0x00)
     time.sleep(40)
     stop()
 
-    logging.info("Now manually rotate to TRUE NORTH and level elevation.")
-    RotorState.set_position(0.0, 0.0)
-    return "Calibration complete. Azimuth set to 0, elevation set to 0."
+    logging.info("Now manually rotate to TRUE NORTH and point antenna straight up.")
+    RotorState.set_position(0.0, 90.0)
+    return "✓ Calibration complete! Azimuth set to 0, elevation set to 90° (UP)"
 
 
-def test_azimuth_speed(duration=10):
-    """
-    Manual test of azimuth speed. Prompts user to enter result.
-    
-    Args:
-        duration: test duration in seconds
-    """
+def test_azimuth_speed(duration: int = 10):
+    """Test azimuth speed by rotating right and measuring degrees."""
     logging.info("Rotating right for %d seconds. Measure degrees moved.", duration)
     send_pelco_d(0x00, 0x02, 0x20, 0x00)
     time.sleep(duration)
     stop()
     try:
         degrees = float(input("Enter degrees moved: "))
-        speed = degrees / duration
-        RotorState.set_config("AZIMUTH_SPEED_DPS", speed)
-        logging.info("Saved AZIMUTH_SPEED_DPS = %.2f", speed)
+        RotorState.set_config("AZIMUTH_SPEED_DPS", degrees / duration)
+        logging.info("Saved AZIMUTH_SPEED_DPS = %.2f", degrees / duration)
     except ValueError:
         logging.error("Invalid input.")
 
 
-def test_elevation_speed(duration=10):
-    """
-    Manual test of elevation speed. Prompts user to enter result.
-
-    Args:
-        duration: test duration in seconds
-    """
+def test_elevation_speed(duration: int = 10):
+    """Test elevation speed by tilting up and measuring degrees."""
     logging.info("Tilting up for %d seconds. Measure degrees moved.", duration)
     send_pelco_d(0x00, 0x08, 0x00, 0x20)
     time.sleep(duration)
     stop()
     try:
         degrees = float(input("Enter degrees moved: "))
-        speed = degrees / duration
-        RotorState.set_config("ELEVATION_SPEED_DPS", speed)
-        logging.info("Saved ELEVATION_SPEED_DPS = %.2f", speed)
+        RotorState.set_config("ELEVATION_SPEED_DPS", degrees / duration)
+        logging.info("Saved ELEVATION_SPEED_DPS = %.2f", degrees / duration)
     except ValueError:
         logging.error("Invalid input.")
 
 
-def run_demo_sequence(update_callback=None):
-    """
-    Execute a predefined movement sequence for demonstration.
-    
-    If `update_callback` is provided, it's called after each step.
-    This allows WebSocket updates to be emitted live.
-    """
+def run_demo_sequence(update_callback: UpdateCallback = None):
+    """Run a fixed set of positions to demo rotor movement."""
     steps = [
-        (0, 0),
-        (90, 30),
+        (0, 90),
+        (90, 60),
         (180, 45),
-        (270, 10),
-        (0, 0)
+        (270, 70),
+        (0, 90)
     ]
     for az, el in steps:
-        msg = send_command(az, el)
-        if update_callback:
-            update_callback(msg)
+        send_command(az, el, update_callback=update_callback)
     if update_callback:
         update_callback("Demo sequence completed.")

@@ -1,4 +1,6 @@
 {
-  "el_min": -50.0,
-  "el_max": 50.0
+  "az_min": 0,
+  "az_max": 360,
+  "el_min": 45,
+  "el_max": 135
 }

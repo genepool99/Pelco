@@ -60,8 +60,8 @@ Accurate rotor control requires knowing your rotor’s **degrees per second** sp
 
 - Connect your rotator via RS-485 and power it on.
 - Rotate azimuth to its **leftmost mechanical stop**, then **center it facing true North**.
-- Level the tilt to 0° elevation (horizontal).
-- This becomes your reference: **Az = 0°, El = 0°**.
+- Tilt the antenna so it is **pointing straight up**.
+- This becomes your reference: **Az = 0°, El = 90°**.
 
 #### Run Calibration
 
@@ -155,13 +155,14 @@ No page refresh needed — uses `Flask-SocketIO` + `eventlet`.
 ```
 peltrack/
 ├── calibrate.py           # CLI calibration tool
-├── config.json            # Saved calibration data
+├── config.json            # Saved calibration data (az/el speed)
 ├── easycomm_server.py     # TCP server for Gpredict
 ├── page_template.py       # Web UI HTML template
 ├── pelco_commands.py      # Rotor control logic
-├── peltrack.py            # Flask + TCP bridge
+├── peltrack.py            # Flask + SocketIO + TCP bridge
 ├── requirements.txt       # Dependencies
-├── state.py               # Shared config/state
+├── state.py               # Shared config/state/limits
+└── limits.json            # Optional Az/El range limits 
 ```
 
 ---
