@@ -13,8 +13,8 @@ Features:
 # pylint: disable=wrong-import-position
 import argparse
 import logging
-import threading
 import json
+import os
 
 import eventlet
 eventlet.monkey_patch()
@@ -35,19 +35,37 @@ from pelco_commands import (
 from easycomm_server import EasyCommServerManager
 from page_template import HTML_PAGE
 
-# Load movement limits from limits.json if it exists
-LIMITS_FILE = "limits.json"
+# -----------------------------------------------------------------------------
+# Limits: load from limits.json (resolved relative to this file) with defaults
+# -----------------------------------------------------------------------------
+BASE_DIR = os.path.dirname(__file__)
+LIMITS_FILE = os.path.join(BASE_DIR, "limits.json")
 DEFAULT_LIMITS = {"az_min": 0, "az_max": 360, "el_min": 45, "el_max": 135}
 try:
     with open(LIMITS_FILE, "r", encoding="utf-8") as f:
         LIMITS = json.load(f)
-except (OSError, ValueError):
-    logging.warning("Using default limits; failed to load limits.json")
+except (OSError, ValueError) as e:
+    logging.warning("Using default limits; failed to load limits.json (%s)", e)
     LIMITS = DEFAULT_LIMITS.copy()
 
+# -----------------------------------------------------------------------------
 # Flask app and WebSocket setup
+# -----------------------------------------------------------------------------
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode="eventlet")
+
+
+def _fmt_float(val, default: float) -> str:
+    """Format a float-or-None safely as X.Y with a default fallback."""
+    try:
+        return f"{float(default if val is None else val):.1f}"
+    except (TypeError, ValueError):
+        return f"{default:.1f}"
+
+
+def _bg(fn, *args, **kwargs):
+    """Run a function in a Socket.IO background task (non-blocking to HTTP)."""
+    socketio.start_background_task(fn, *args, **kwargs)
 
 
 def socketio_emit_position(msg=None):
@@ -81,8 +99,8 @@ def index():
     html = html.replace("{{msg}}", "")
     html = html.replace("{{caz}}", f"{az:.1f}")
     html = html.replace("{{cel}}", f"{el:.1f}")
-    html = html.replace("{{az_speed}}", f"{az_speed:.1f}")
-    html = html.replace("{{el_speed}}", f"{el_speed:.1f}")
+    html = html.replace("{{az_speed}}", _fmt_float(az_speed, 10.0))
+    html = html.replace("{{el_speed}}", _fmt_float(el_speed, 5.0))
     return html
 
 
@@ -97,33 +115,36 @@ def control():
     action = request.form.get("action")
     try:
         if action == "calibrate":
-            msg = calibrate()
+            _bg(calibrate, update_callback=socketio_emit_position)
+            msg = "Calibration started…"
         elif action == "reset":
             set_position(0.0, 90.0)
             msg = "Position reset to 0° azimuth and 90° elevation (zenith)."
         elif action == "demo":
-            threading.Thread(
-                target=run_demo_sequence,
-                kwargs={"update_callback": socketio_emit_position},
-                daemon=True
-            ).start()
-            msg = "Demo started"
+            _bg(run_demo_sequence, update_callback=socketio_emit_position)
+            msg = "Demo started…"
         elif action == "set":
             az = float(request.form.get("azimuth"))
             el = float(request.form.get("elevation"))
             az = min(max(az, LIMITS["az_min"]), LIMITS["az_max"])
             el = min(max(el, LIMITS["el_min"]), LIMITS["el_max"])
-            msg = send_command(az, el, update_callback=socketio_emit_position)
+            _bg(send_command, az, el, update_callback=socketio_emit_position)
+            msg = f"Move started to AZ={az:.1f}°, EL={el:.1f}°…"
         elif action == "nudge_up":
-            msg = nudge_elevation(1, 1.0)
+            _bg(nudge_elevation, 1, 1.0, update_callback=socketio_emit_position)
+            msg = "Nudge up started…"
         elif action == "nudge_down":
-            msg = nudge_elevation(-1, 1.0)
+            _bg(nudge_elevation, -1, 1.0, update_callback=socketio_emit_position)
+            msg = "Nudge down started…"
         elif action == "nudge_up_big":
-            msg = nudge_elevation(1, 2.0)
+            _bg(nudge_elevation, 1, 2.0, update_callback=socketio_emit_position)
+            msg = "Big nudge up started…"
         elif action == "nudge_down_big":
-            msg = nudge_elevation(-1, 2.0)
+            _bg(nudge_elevation, -1, 2.0, update_callback=socketio_emit_position)
+            msg = "Big nudge down started…"
         elif action == "horizon":
-            msg = set_horizon()
+            _bg(set_horizon, update_callback=socketio_emit_position)
+            msg = "Returning to EL=90° (zenith) started…"
         elif action == "stop":
             stop()
             msg = "Rotor stopped."
@@ -142,8 +163,8 @@ def control():
     html = html.replace("{{msg}}", msg)
     html = html.replace("{{caz}}", f"{az:.1f}")
     html = html.replace("{{cel}}", f"{el:.1f}")
-    html = html.replace("{{az_speed}}", f"{az_speed:.1f}")
-    html = html.replace("{{el_speed}}", f"{el_speed:.1f}")
+    html = html.replace("{{az_speed}}", _fmt_float(az_speed, 10.0))
+    html = html.replace("{{el_speed}}", _fmt_float(el_speed, 5.0))
     return html
 
 
@@ -164,6 +185,7 @@ def main():
 
     init_serial(args.port, args.baud)
 
+    server = None
     EasyCommServerManager.start(update_callback=socketio_emit_position)
     server = EasyCommServerManager.get_instance()
 
@@ -173,7 +195,8 @@ def main():
     except KeyboardInterrupt:
         logging.info("Shutting down Peltrack.")
     finally:
-        server.stop()
+        if server is not None:
+            server.stop()
 
 
 if __name__ == "__main__":
