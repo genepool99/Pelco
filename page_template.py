@@ -1,244 +1,414 @@
-"""
-This file contains the HTML template for the Peltrack control panel.
-"""
+"""Peltrack web UI HTML template (single-page, above-the-fold layout)."""
+
+__all__ = ["HTML_PAGE"]
 
 HTML_PAGE = """
 <!doctype html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\">
+  <meta charset="utf-8">
   <title>Peltrack</title>
-  <meta name=\"description\" content=\"Peltrack: Pelco-D rotor controller web interface\">
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">
-  <script src=\"https://cdn.socket.io/4.7.2/socket.io.min.js\"></script>
+  <meta name="description" content="Peltrack: Pelco-D rotor controller web interface">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
     :root {
-      --gap: 16px;
-      --dial-size: 300px;   /* azimuth dial */
-      --el-height: 300px;   /* elevation bar height */
-      --radius: calc(var(--dial-size) / 2);
-      --panel-pad: 12px;
-      --card-bg: #f8f8f8;
-      --border: #d9d9d9;
-      --text: #222;
-      --muted: #666;
+      --gap: 14px;
+      --card-pad: 12px;
+      --radius: 12px;
+      --border: #d0d7de;
+      --bg: #fafbfc;
+      --fg: #1f2328;
+      --muted: #57606a;
+
+      /* Sizes tuned for 100% zoom @ 1280×720 */
+      --dial: 280px;      /* azimuth dial size */
+      --bar-h: 280px;     /* elevation bar height */
+      --btn-h: 44px;      /* bigger touch area */
+      --btn-font: 16px;
+      --input-font: 18px;
+
+      /* Button colors */
+      --primary: #0ea5e9;   /* Send */
+      --primary-fg: #fff;
+      --accent: #6366f1;    /* Return-to actions */
+      --accent-fg: #fff;
+      --neutral: #e5e7eb;   /* Reset, Demo */
+      --neutral-fg: #111827;
+      --secondary: #f3f4f6; /* Nudges */
+      --secondary-fg: #111827;
+      --warning: #f59e0b;   /* Calibrate */
+      --warning-fg: #111827;
+      --danger: #ef4444;    /* Stop */
+      --danger-fg: #fff;
     }
 
-    @media (max-width: 1280px), (max-height: 720px) {
-      :root {
-        --gap: 12px;
-        --dial-size: 240px;
-        --el-height: 240px;
-      }
-      h1 { font-size: 20px; }
-      body { margin: 12px; }
-      .azimuth-label { font-size: 12px; }
-      /* Hide diagonal labels to declutter */
-      .azimuth .diag { display: none; }
+    @media (max-width: 480px) {
+      :root { --dial: 220px; --bar-h: 220px; --btn-font: 16px; --btn-h: 46px; }
     }
 
     * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; color: var(--text); }
-    h1 { margin: 0 0 10px; }
+    html, body { height: 100%; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); background: var(--bg); }
 
-    /* Layout */
-    .container { display: grid; gap: var(--gap); }
-    .panel { display: flex; flex-wrap: wrap; gap: var(--gap); align-items: center; }
-
-    /* Cards */
-    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: var(--panel-pad); }
-
-    /* Form */
-    form { display: grid; gap: var(--gap); }
-    .toolbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--gap); }
-    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--gap); }
-    .group { display: grid; gap: 8px; }
-
-    label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; font-size: 14px; }
-    input[type=number] { width: 110px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
-
-    button { cursor: pointer; border: 1px solid var(--border); background: white; border-radius: 10px; padding: 8px 12px; font-size: 14px; }
-    button:hover { background: #fffefe; }
-
-    .status { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+    /* Shell */
+    .wrap { display: grid; gap: var(--gap); padding: var(--gap); max-width: 1200px; margin: 0 auto; }
+    header { display: grid; gap: 6px; }
+    h1 { margin: 0; font-size: 22px; }
+    .status-line { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: baseline; }
     .muted { color: var(--muted); }
 
-    /* Azimuth Dial */
-    .azimuth { position: relative; width: var(--dial-size); height: var(--dial-size); border: 1px solid #ccc; border-radius: 50%; background: #fff; }
-    .azimuth svg { width: 100%; height: 100%; display: block; }
-    .azimuth-label { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; }
-
-    /* Elevation Bar */
-    .elevation { display: grid; justify-items: center; align-content: start; gap: 6px; }
-    .elevation svg { width: 60px; height: var(--el-height); display: block; }
-    .label { font-size: 12px; text-align: center; }
-
-    /* Helpers */
-    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
-
-    @media (max-width: 720px) {
-      .grid-2 { grid-template-columns: 1fr; }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #fde68a;
+      color: #7c2d12;
+      border: 1px solid #f59e0b;
+      font-size: 12px;
+      font-weight: 600;
     }
+
+    /* Above-the-fold grid: controls left, gauges right */
+    .af-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: var(--gap); align-items: start; }
+    @media (max-width: 1000px) { .af-grid { grid-template-columns: 1fr; } }
+
+    /* Cards */
+    .card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: var(--card-pad); }
+    .ctrl-card { display: grid; gap: var(--gap); }
+
+    /* Controls */
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--gap); }
+    .row-tight { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap); }
+
+    label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; font-size: 15px; }
+    input[type=number] {
+      width: 140px; padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: 10px; font-size: var(--input-font);
+    }
+    input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+    .btn {
+      cursor: pointer; height: var(--btn-h); border: 1px solid var(--border);
+      background: #fff; border-radius: 10px; font-size: var(--btn-font); padding: 0 14px;
+    }
+    .btn:hover { filter: brightness(0.98); }
+
+    .btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+    .btn-accent  { background: var(--accent);  color: var(--accent-fg);  border-color: var(--accent); }
+    .btn-warning { background: var(--warning); color: var(--warning-fg); border-color: var(--warning); }
+    .btn-danger  { background: var(--danger);  color: var(--danger-fg);  border-color: var(--danger); }
+    .btn-neutral { background: var(--neutral); color: var(--neutral-fg); border-color: var(--neutral); }
+    .btn-secondary { background: var(--secondary); color: var(--secondary-fg); border-color: var(--border); }
+
+    .btn-block { width: 100%; }
+
+    /* Gauges */
+    .gauges { display: grid; gap: var(--gap); }
+    .readouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
+    .readout { text-align: center; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+    .readout .big { font-size: 28px; font-weight: 700; }
+
+    .azimuth { position: relative; width: var(--dial); height: var(--dial); border: 1px solid var(--border); border-radius: 50%; background: #fff; margin: 0 auto; }
+    .azimuth svg { width: 100%; height: 100%; display: block; }
+    .needle { stroke: #e31b4b; stroke-width: 2; }
+    .center { fill: #000; }
+
+    .elevation { display: grid; justify-items: center; align-content: start; gap: 6px; }
+    .elevation svg { width: 90px; height: var(--bar-h); display: block; }
+
+    /* Blocking modal for calibration */
+    .modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+      display: none; align-items: center; justify-content: center; z-index: 9999;
+    }
+    .modal.open { display: flex; }
+    .modal-card {
+      width: min(520px, 92vw); max-height: 80vh; overflow: auto;
+      background: #fff; border-radius: 12px; border: 1px solid var(--border);
+      padding: 16px; display: grid; gap: 10px;
+    }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; white-space: pre-wrap; background: #f8fafc; border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
+
+    .footer { text-align: center; font-size: 12px; color: var(--muted); }
+    .dimmed * { pointer-events: none; }
   </style>
 </head>
 <body>
-  <div class=\"container\">
-    <h1>Peltrack Control Panel</h1>
-
-    <form method=\"post\" id=\"mainForm\" class=\"card\">
-      <input type=\"hidden\" name=\"action\" id=\"action\">
-
-      <div class=\"toolbar grid-2\">
-        <label>
-          <span>Azimuth</span>
-          <input name=\"azimuth\" type=\"number\" step=\"0.1\" value=\"{{az}}\">
-        </label>
-        <label>
-          <span>Elevation</span>
-          <input name=\"elevation\" type=\"number\" step=\"0.1\" value=\"{{el}}\">
-        </label>
+  <div class="wrap">
+    <header>
+      <h1>Peltrack Control Panel</h1>
+      <div class="status-line">
+        <div><strong>Status:</strong> <span id="msg" aria-live="polite">{{msg}}</span></div>
+        <div><strong>AZ</strong> <span id="az">{{caz}}</span>°</div>
+        <div><strong>EL</strong> <span id="el">{{cel}}</span>°</div>
+        <div class="muted"><strong>Speed</strong> AZ {{az_speed}}°/s · EL {{el_speed}}°/s</div>
+        <!-- Requested vs actual (shows if backend provides req_* / clamped) -->
+        <div><strong>Req AZ</strong> <span id="req-az">—</span>°</div>
+        <div><strong>Req EL</strong> <span id="req-el">—</span>°</div>
+        <span id="clamped" class="badge" style="display:none;">⚠︎ Clamped to limits</span>
       </div>
+    </header>
 
-      <div class=\"controls\">
-        <div class=\"group card\">
-          <button type=\"submit\" onclick=\"setAction('set')\">Send</button>
-          <button type=\"submit\" onclick=\"setAction('reset')\">Reset Position</button>
-          <button type=\"submit\" onclick=\"setAction('calibrate')\">Calibrate</button>
-          <button type=\"submit\" onclick=\"setAction('horizon')\">Set Zenith (EL=90°)</button>
-          <button type=\"submit\" onclick=\"setAction('demo')\">Run Demo</button>
+    <div class="af-grid">
+      <!-- Controls -->
+      <form method="post" id="mainForm" class="card ctrl-card" autocomplete="off">
+        <input type="hidden" name="action" id="action">
+
+        <div class="row">
+          <label>
+            <span>Azimuth (°)</span>
+            <input name="azimuth" type="number" step="0.1" inputmode="decimal" value="{{az}}">
+          </label>
+          <label>
+            <span>Elevation (°)</span>
+            <input name="elevation" type="number" step="0.1" inputmode="decimal" value="{{el}}">
+          </label>
         </div>
-        <div class=\"group card\">
-          <button type=\"submit\" onclick=\"setAction('nudge_up')\">Nudge Up ↑</button>
-          <button type=\"submit\" onclick=\"setAction('nudge_up_big')\">Nudge Up ↑↑</button>
-          <button type=\"submit\" onclick=\"setAction('nudge_down')\">Nudge Down ↓</button>
-          <button type=\"submit\" onclick=\"setAction('nudge_down_big')\">Nudge Down ↓↓</button>
-          <button type=\"submit\" onclick=\"setAction('stop')\">Stop</button>
+
+        <!-- Primary / safety / return-to / config-affecting -->
+        <div class="row">
+          <button type="button" class="btn btn-primary" onclick="postAction('set')">Send</button>
+          <button type="button" class="btn btn-neutral" onclick="postAction('reset')">Reset Pos</button>
+          <button type="button" class="btn btn-warning" onclick="startCalibration()">Calibrate</button>
+          <button type="button" class="btn btn-accent" onclick="postAction('horizon')">EL → 90°</button>
+          <button type="button" class="btn btn-accent" onclick="postAction('az_zero')">AZ → 0°</button>
+          <button type="button" class="btn btn-danger" onclick="postAction('stop')">STOP</button>
+        </div>
+
+        <!-- Nudges / demo -->
+        <div class="row row-tight">
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_left')">AZ ← small</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_right')">AZ → small</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_left_big')">AZ ⇤ big</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_right_big')">AZ ⇥ big</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_up')">EL ↑ small</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_down')">EL ↓ small</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_up_big')">EL ↑↑ big</button>
+          <button type="button" class="btn btn-secondary" onclick="postAction('nudge_down_big')">EL ↓↓ big</button>
+          <button type="button" class="btn btn-neutral" onclick="postAction('demo')">Run Demo</button>
+        </div>
+      </form>
+
+      <!-- Monitoring -->
+      <div class="gauges">
+        <div class="readouts">
+          <div class="readout"><div>Azimuth</div><div class="big" id="az-display">{{caz}}</div></div>
+          <div class="readout"><div>Elevation</div><div class="big" id="el-display">{{cel}}</div></div>
+        </div>
+
+        <div class="card" style="display:grid; grid-template-columns: var(--dial) 120px; gap: var(--gap); justify-content:center;">
+          <!-- Azimuth Dial -->
+          <div class="azimuth" aria-label="Azimuth Dial">
+            <svg id="az-svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet">
+              <g id="az-ticks"></g>
+              <line id="az-line" class="needle" x1="150" y1="150" x2="150" y2="50"/>
+              <circle class="center" cx="150" cy="150" r="3"/>
+            </svg>
+          </div>
+
+          <!-- Elevation Bar -->
+          <div class="elevation" aria-label="Elevation Bar" style="align-items:center;">
+            <svg id="el-svg" width="90" height="300">
+              <rect x="20" y="0" width="50" height="300" fill="#f8fafc" stroke="#cbd5e1"/>
+              <rect id="el-fill" x="20" y="0" width="50" height="0" fill="#a7d3ff"/>
+              <line id="el-line" x1="20" x2="70" y1="150" y2="150" stroke="#1e66f5" stroke-width="2"/>
+              <g id="el-ticks"></g>
+            </svg>
+          </div>
         </div>
       </div>
-    </form>
-
-    <div class=\"status\">
-      <p><strong>Status:</strong> <span id=\"msg\" aria-live=\"polite\">{{msg}}</span></p>
-      <p>Current Position: AZ = <span id=\"az\">{{caz}}</span>° &nbsp; EL = <span id=\"el\">{{cel}}</span>°</p>
-      <p class=\"muted\"><strong>Calibrated Speed</strong>: AZ = {{az_speed}}°/s, EL = {{el_speed}}°/s</p>
     </div>
 
-    <div class=\"panel\">
-      <!-- Azimuth Dial -->
-      <div class=\"azimuth card\" aria-label=\"Azimuth Dial\">
-        <svg viewBox=\"0 0 300 300\" preserveAspectRatio=\"xMidYMid meet\">
-          <circle cx=\"150\" cy=\"150\" r=\"145\" fill=\"none\" stroke=\"#ccc\" stroke-width=\"1\"/>
+    <div class="footer">Peltrack - Avi Solomon [AE7ET]</div>
+  </div>
 
-          <!-- Ticks and Labels -->
-          <g font-family=\"sans-serif\" font-size=\"10\" fill=\"black\" stroke=\"black\">
-            <line x1=\"150\" y1=\"5\" x2=\"150\" y2=\"15\" stroke-width=\"2\"/>
-            <text x=\"150\" y=\"25\" text-anchor=\"middle\">N</text>
-
-            <line x1=\"222\" y1=\"27\" x2=\"215\" y2=\"41\" stroke-width=\"1\"/>
-            <line x1=\"246\" y1=\"54\" x2=\"237\" y2=\"63\" stroke-width=\"2\"/>
-            <text class=\"diag\" x=\"240\" y=\"50\" text-anchor=\"start\">NE</text>
-
-            <line x1=\"270\" y1=\"78\" x2=\"257\" y2=\"85\" stroke-width=\"1\"/>
-            <line x1=\"295\" y1=\"150\" x2=\"285\" y2=\"150\" stroke-width=\"2\"/>
-            <text x=\"272\" y=\"153\" text-anchor=\"start\">E</text>
-
-            <line x1=\"270\" y1=\"222\" x2=\"257\" y2=\"215\" stroke-width=\"1\"/>
-            <line x1=\"246\" y1=\"246\" x2=\"237\" y2=\"237\" stroke-width=\"2\"/>
-            <text class=\"diag\" x=\"240\" y=\"260\" text-anchor=\"start\">SE</text>
-
-            <line x1=\"222\" y1=\"270\" x2=\"215\" y2=\"257\" stroke-width=\"1\"/>
-            <line x1=\"150\" y1=\"295\" x2=\"150\" y2=\"285\" stroke-width=\"2\"/>
-            <text x=\"150\" y=\"280\" text-anchor=\"middle\">S</text>
-
-            <line x1=\"78\" y1=\"270\" x2=\"85\" y2=\"257\" stroke-width=\"1\"/>
-            <line x1=\"54\" y1=\"246\" x2=\"63\" y2=\"237\" stroke-width=\"2\"/>
-            <text class=\"diag\" x=\"40\" y=\"260\" text-anchor=\"end\">SW</text>
-
-            <line x1=\"30\" y1=\"222\" x2=\"43\" y2=\"215\" stroke-width=\"1\"/>
-            <line x1=\"5\" y1=\"150\" x2=\"15\" y2=\"150\" stroke-width=\"2\"/>
-            <text x=\"28\" y=\"153\" text-anchor=\"end\">W</text>
-
-            <line x1=\"30\" y1=\"78\" x2=\"43\" y2=\"85\" stroke-width=\"1\"/>
-            <line x1=\"54\" y1=\"54\" x2=\"63\" y2=\"63\" stroke-width=\"2\"/>
-            <text class=\"diag\" x=\"40\" y=\"50\" text-anchor=\"end\">NW</text>
-            <line x1=\"78\" y1=\"30\" x2=\"85\" y2=\"43\" stroke-width=\"1\"/>
-          </g>
-
-          <!-- Rotor -->
-          <line id=\"az-line\" x1=\"150\" y1=\"150\" x2=\"150\" y2=\"50\" stroke=\"red\" stroke-width=\"2\"/>
-          <circle cx=\"150\" cy=\"150\" r=\"3\" fill=\"black\"/>
-        </svg>
-        <div class=\"azimuth-label\">AZ: <span id=\"az-display\">{{caz}}</span>°</div>
-      </div>
-
-      <!-- Elevation Panel -->
-      <div class=\"elevation card\" aria-label=\"Elevation Bar\">
-        <svg id=\"el-svg\" width=\"60\" height=\"300\">
-          <rect x=\"5\" y=\"0\" width=\"50\" height=\"300\" fill=\"#f0f0f0\" stroke=\"black\"/>
-          <rect id=\"el-fill\" x=\"5\" y=\"0\" width=\"50\" height=\"0\" fill=\"lightblue\"/>
-          <line id=\"el-line\" x1=\"5\" x2=\"55\" y1=\"150\" y2=\"150\" stroke=\"blue\" stroke-width=\"2\"/>
-          <text id=\"el-text\" x=\"30\" y=\"20\" text-anchor=\"middle\" font-size=\"12\">EL</text>
-        </svg>
-        <div class=\"label\">EL: <span id=\"el-display\">{{cel}}</span>°</div>
-      </div>
+  <!-- Blocking Modal -->
+  <div id="cal-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cal-title">
+    <div class="modal-card">
+      <h2 id="cal-title">Calibration in progress…</h2>
+      <div id="cal-log" class="log"></div>
+      <button type="button" class="btn btn-neutral btn-block" onclick="closeCalibrationModal()">Hide</button>
     </div>
   </div>
 
   <script>
-  if (window.history.replaceState) {
-    window.history.replaceState(null, null, window.location.href);
+  const form = document.getElementById('mainForm');
+  const actionInput = document.getElementById('action');
+  const azInput = document.querySelector('input[name="azimuth"]');
+  const elInput = document.querySelector('input[name="elevation"]');
+  const modal = document.getElementById('cal-modal');
+  const logEl = document.getElementById('cal-log');
+
+  function setAction(name) { actionInput.value = name; }
+  async function postAction(name) {
+    setAction(name);
+    try {
+      const fd = new FormData(form);
+      await fetch('/', { method: 'POST', body: fd });
+      // socket "position" event will update UI
+    } catch (err) {
+      console.error('POST failed', err);
+    }
   }
 
-  function setAction(name) {
-    document.getElementById("action").value = name;
-    console.log("Set action to:", name);
+  // Calibration modal helpers
+  let modalCloseTimer = null;
+  function openCalibrationModal() {
+    document.body.classList.add('dimmed');
+    modal.classList.add('open');
+    logEl.textContent = '';
+    if (modalCloseTimer) { clearTimeout(modalCloseTimer); modalCloseTimer = null; }
+  }
+  function closeCalibrationModal() {
+    modal.classList.remove('open');
+    document.body.classList.remove('dimmed');
+  }
+  function startCalibration() {
+    openCalibrationModal();
+    postAction('calibrate');
   }
 
-  const socket = io();
+  // Build compass ticks/labels (every 10°, label every 30° + cardinal letters)
+  function buildAzimuthTicks() {
+    const g = document.getElementById('az-ticks');
+    const cx = 150, cy = 150, rOuter = 145;
+    for (let deg = 0; deg < 360; deg += 10) {
+      const rad = deg * Math.PI / 180;
+      const isMajor = (deg % 30) === 0;
+      const r1 = isMajor ? 135 : 140;
+      const r2 = rOuter;
+      const x1 = cx + r1 * Math.sin(rad);
+      const y1 = cy - r1 * Math.cos(rad);
+      const x2 = cx + r2 * Math.sin(rad);
+      const y2 = cy - r2 * Math.cos(rad);
 
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+      line.setAttribute("stroke", "#94a3b8");
+      line.setAttribute("stroke-width", isMajor ? "2" : "1");
+      g.appendChild(line);
+
+      if (isMajor) {
+        const lx = cx + 122 * Math.sin(rad);
+        const ly = cy - 122 * Math.cos(rad) + 4;
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", lx); t.setAttribute("y", ly);
+        t.setAttribute("font-size", "10");
+        t.setAttribute("text-anchor", "middle");
+        t.textContent = String(deg);
+        g.appendChild(t);
+      }
+    }
+    // Cardinal letters
+    const labels = [{d:0,txt:'N'},{d:90,txt:'E'},{d:180,txt:'S'},{d:270,txt:'W'}];
+    labels.forEach(({d,txt}) => {
+      const rad = d * Math.PI / 180;
+      const lx = 150 + 100 * Math.sin(rad);
+      const ly = 150 - 100 * Math.cos(rad) + 4;
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", lx); t.setAttribute("y", ly);
+      t.setAttribute("font-size", "12"); t.setAttribute("font-weight", "600");
+      t.setAttribute("text-anchor", "middle");
+      t.textContent = txt;
+      g.appendChild(t);
+    });
+    // Outer ring
+    const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    ring.setAttribute("cx", 150); ring.setAttribute("cy", 150); ring.setAttribute("r", rOuter);
+    ring.setAttribute("fill", "none"); ring.setAttribute("stroke", "#cbd5e1"); ring.setAttribute("stroke-width", "1");
+    g.appendChild(ring);
+  }
+
+  // Elevation ticks: 45..135 step 15, labels on right
+  function buildElevationTicks() {
+    const g = document.getElementById('el-ticks');
+    const full = 300;
+    const x1 = 74, x2 = 82;
+    for (let deg = 45; deg <= 135; deg += 15) {
+      const pct = 1 - (deg - 45) / 90;
+      const y = full - pct * full;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1); line.setAttribute("x2", x2);
+      line.setAttribute("y1", y);  line.setAttribute("y2", y);
+      line.setAttribute("stroke", "#94a3b8"); line.setAttribute("stroke-width", "2");
+      g.appendChild(line);
+
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", x2 + 4); t.setAttribute("y", y + 4);
+      t.setAttribute("font-size", "10");
+      t.textContent = String(deg) + "°";
+      g.appendChild(t);
+    }
+  }
+
+  // Visual updates
   function updateAzimuth(angle) {
     const radians = angle * Math.PI / 180;
-    const length = 100; // in SVG user units (viewBox coords)
-    const x = 150 + length * Math.sin(radians);
-    const y = 150 - length * Math.cos(radians);
-
-    const line = document.getElementById("az-line");
-    line.setAttribute("x2", x);
-    line.setAttribute("y2", y);
-
-    document.getElementById("az").textContent = angle.toFixed(1);
-    document.getElementById("az-display").textContent = angle.toFixed(1);
+    const len = 100; // SVG units
+    const x = 150 + len * Math.sin(radians);
+    const y = 150 - len * Math.cos(radians);
+    const line = document.getElementById('az-line');
+    line.setAttribute('x2', x);
+    line.setAttribute('y2', y);
+    document.getElementById('az').textContent = angle.toFixed(1);
+    document.getElementById('az-display').textContent = angle.toFixed(1);
+    azInput.value = angle.toFixed(1); // keep input synced
   }
 
   function updateElevation(el) {
-    const clampedEl = Math.max(45, Math.min(135, el));
-    // Map 45..135 => 300..0 (SVG user units)
-    const elPct = 1 - (clampedEl - 45) / 90; // 1 at 45°, 0 at 135°
-    const full = 300; // matches SVG height
-    const fillHeight = elPct * full;
-    const yFill = full - fillHeight;
-
-    const fillRect = document.getElementById("el-fill");
-    fillRect.setAttribute("y", yFill);
-    fillRect.setAttribute("height", fillHeight);
-
-    const line = document.getElementById("el-line");
-    line.setAttribute("y1", yFill);
-    line.setAttribute("y2", yFill);
-
-    document.getElementById("el").textContent = el.toFixed(1);
-    document.getElementById("el-display").textContent = el.toFixed(1);
+    const clamped = Math.max(45, Math.min(135, el));
+    const full = 300; // SVG height
+    const pct = 1 - (clamped - 45) / 90; // 1 @45°, 0 @135°
+    const h = pct * full;
+    const y = full - h;
+    document.getElementById('el-fill').setAttribute('y', y);
+    document.getElementById('el-fill').setAttribute('height', h);
+    document.getElementById('el-line').setAttribute('y1', y);
+    document.getElementById('el-line').setAttribute('y2', y);
+    document.getElementById('el').textContent = el.toFixed(1);
+    document.getElementById('el-display').textContent = el.toFixed(1);
+    elInput.value = el.toFixed(1); // keep input synced
   }
 
-  socket.on("position", function (data) {
-    if ("az" in data) updateAzimuth(data.az);
-    if ("el" in data) updateElevation(data.el);
-    if ("msg" in data) {
-      document.getElementById("msg").textContent = data.msg;
+  // Socket wiring
+  const socket = io();
+  socket.on('position', (data) => {
+    if ('az' in data) updateAzimuth(data.az);
+    if ('el' in data) updateElevation(data.el);
+    if ('msg' in data) {
+      document.getElementById('msg').textContent = data.msg;
+      // Calibration modal logging + forced sync on completion (fix EL=0 bug)
+      if (data.msg.startsWith('Calibrating:')) {
+        openCalibrationModal();
+        logEl.textContent += (data.msg + "\\n");
+      } else if (data.msg.includes('Calibration complete')) {
+        logEl.textContent += (data.msg + "\\n");
+        // Force-sync EL=90° and AZ=0° in case any client missed the final state
+        updateAzimuth(0);
+        updateElevation(90);
+        if (modalCloseTimer) clearTimeout(modalCloseTimer);
+        modalCloseTimer = setTimeout(closeCalibrationModal, 2500);
+      }
     }
+
+    // Show last requested vs actual + clamped badge (if provided by backend)
+    if ('req_az' in data) document.getElementById('req-az').textContent = Number(data.req_az).toFixed(1);
+    if ('req_el' in data) document.getElementById('req-el').textContent = Number(data.req_el).toFixed(1);
+    const badge = document.getElementById('clamped');
+    if ('clamped' in data && data.clamped) { badge.style.display = 'inline-block'; } else { badge.style.display = 'none'; }
+  });
+
+  // Intercept Enter on inputs to use fetch
+  form.addEventListener('submit', (e) => { e.preventDefault(); postAction('set'); });
+
+  // Build tick marks once
+  document.addEventListener('DOMContentLoaded', () => {
+    buildAzimuthTicks();
+    buildElevationTicks();
   });
   </script>
-
 </body>
 </html>
 """

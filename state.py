@@ -4,6 +4,7 @@ Provides:
 - Thread-safe rotor position tracking
 - Thread-safe serial handle storage
 - Persistent config file management (atomic writes)
+- Last-request tracking (requested vs applied/clamped targets)
 - Aliases for convenient imports (backward compatible)
 
 ENV:
@@ -37,6 +38,15 @@ class RotorState:
     _POSITION: Tuple[float, float] = (0.0, 0.0)  # (azimuth, elevation)
     _SERIAL_PORT: Optional[object] = None  # pyserial.Serial or compatible
 
+    # Track the last user request vs the applied/clamped move for UI/reporting
+    # Example structure:
+    # {
+    #   "req_az": 380.0, "req_el": 140.0,
+    #   "target_az": 360.0, "target_el": 135.0,
+    #   "clamped": True, "ts": 1712345678.9, "action": "set"
+    # }
+    _LAST_REQUEST: Optional[Dict[str, Any]] = None
+
     # Config file
     _BASE_DIR: str = os.path.dirname(__file__)
     _CONFIG_FILE: str = os.getenv("PELTRACK_CONFIG", os.path.join(_BASE_DIR, "config.json"))
@@ -47,7 +57,7 @@ class RotorState:
     }
     _CONFIG: Dict[str, Any] = _DEFAULT_CONFIG.copy()
 
-    # Global lock used across serial send, position, and config ops
+    # Global lock used across serial send, position, last-request, and config ops
     lock: Lock = Lock()
 
     # ----------------- Serial Port -----------------
@@ -80,6 +90,25 @@ class RotorState:
     def reset_position(cls) -> None:
         """Reset rotor position to default (0° azimuth, 0° elevation)."""
         cls.set_position(0.0, 0.0)
+
+    # ----------------- Last Request (req vs applied/clamped) -----------------
+    @classmethod
+    def set_last_request(cls, data: Dict[str, Any]) -> None:
+        """Store details of the last requested move (thread-safe, in-memory only)."""
+        with cls.lock:
+            cls._LAST_REQUEST = dict(data) if data is not None else None
+
+    @classmethod
+    def get_last_request(cls) -> Optional[Dict[str, Any]]:
+        """Return a shallow copy of the last requested move, if any (thread-safe)."""
+        with cls.lock:
+            return None if cls._LAST_REQUEST is None else dict(cls._LAST_REQUEST)
+
+    @classmethod
+    def clear_last_request(cls) -> None:
+        """Clear the last-request record (thread-safe)."""
+        with cls.lock:
+            cls._LAST_REQUEST = None
 
     # ----------------- Config -----------------
     @classmethod
@@ -165,6 +194,11 @@ set_serial_port = RotorState.set_serial_port
 get_serial_port = RotorState.get_serial_port
 get_config = RotorState.get_config
 set_config = RotorState.set_config
+
+# NEW: last-request aliases
+get_last_request = RotorState.get_last_request
+set_last_request = RotorState.set_last_request
+clear_last_request = RotorState.clear_last_request
 
 # Load config when module is imported
 RotorState.load_config()
