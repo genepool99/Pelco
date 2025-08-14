@@ -12,7 +12,7 @@ import time
 import os
 import json
 import logging
-from typing import Optional, Callable
+from typing import Optional, Callable, Union, Dict, Any
 
 import serial
 
@@ -23,6 +23,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+UpdatePayload = Union[str, Dict[str, Any]]
 UpdateCallback = Optional[Callable[[str], None]]
 
 # --------------------------------------------------------------------
@@ -256,15 +257,38 @@ def set_horizon(update_callback: UpdateCallback = None) -> str:
 # --------------------------------------------------------------------
 def calibrate(update_callback: UpdateCallback = None) -> str:
     """
-    Calibrate both azimuth and elevation:
-    - Tilt fully down
-    - Tilt up by configured degrees
-    - Rotate azimuth fully left
-    Emits progress via update_callback so the UI can show a live modal.
+    Calibrate both azimuth and elevation with live progress:
+      1) Tilt fully down
+      2) Tilt up by configured degrees
+      3) Rotate azimuth fully left
+    Progress fields:
+      - cal_progress: float in [0..1]
+      - cal_stage: str label for current stage
     """
-    def _emit(msg: str) -> None:
+    def _emit_progress(stage: str, elapsed_s: float, total_s: float) -> None:
+        pct = 1.0 if total_s <= 0 else max(0.0, min(1.0, elapsed_s / total_s))
         if update_callback:
-            update_callback(msg)
+            update_callback({
+                "msg": f"Calibrating: {stage}… {int(pct*100)}%",
+                "cal_stage": stage,
+                "cal_progress": pct,
+            })
+
+    def _sleep_with_ticks(duration: float, stage: str, elapsed_so_far: float,
+                          total: float, interval: float = 0.25) -> float:
+        """Sleep in small chunks and emit progress ticks."""
+        start = time.time()
+        # emit immediately (t=0) so the bar moves at stage start
+        _emit_progress(stage, elapsed_so_far, total)
+        while True:
+            now = time.time()
+            done = now - start
+            if done >= duration:
+                _emit_progress(stage, elapsed_so_far + duration, total)
+                break
+            _emit_progress(stage, elapsed_so_far + done, total)
+            time.sleep(interval)
+        return duration
 
     # --- Load timing/config values ---
     down_time = _get_config_with_default("CALIBRATE_DOWN_DURATION_SEC", 10)
@@ -272,38 +296,42 @@ def calibrate(update_callback: UpdateCallback = None) -> str:
     el_speed = _get_config_with_default("ELEVATION_SPEED_DPS", 5.0)
     az_time = _get_config_with_default("CALIBRATE_AZ_LEFT_DURATION_SEC", 40)
 
+    up_secs = float(up_degrees) / el_speed if el_speed and el_speed > 0 else 0.0
+    total_secs = max(0.0, float(down_time)) + max(0.0, up_secs) + max(0.0, float(az_time))
+    elapsed = 0.0
+
     logging.info(
-        "Starting calibration with down_time=%.1f, up_degrees=%s, az_time=%.1f",
-        down_time,
-        up_degrees,
-        az_time,
+        "Starting calibration with down_time=%.1fs, up_degrees=%s (%.1fs), az_time=%.1fs",
+        down_time, up_degrees, up_secs, az_time
     )
 
-    _emit("Calibrating: moving fully down to mechanical stop…")
+    # --- 1) Elevation down ---
     send_pelco_d(0x00, 0x10, 0x00, 0x20)  # Down
-    time.sleep(down_time)
+    elapsed += _sleep_with_ticks(max(0.0, float(down_time)), "moving fully down", elapsed, total_secs)
     stop()
 
-    _emit(f"Calibrating: tilting up ~{up_degrees}° at {el_speed:.1f}°/s…")
+    # --- 2) Elevation up ---
     send_pelco_d(0x00, 0x08, 0x00, 0x20)  # Up
-    up_secs = float(up_degrees) / el_speed if el_speed > 0 else 0.0
-    if up_secs > 0:
-        time.sleep(up_secs)
-        stop()
-
-    _emit("Calibrating: rotating azimuth fully left…")
-    send_pelco_d(0x00, 0x04, 0x20, 0x00)  # Left
-    time.sleep(az_time)
+    elapsed += _sleep_with_ticks(max(0.0, float(up_secs)), f"tilting up ~{up_degrees}°", elapsed, total_secs)
     stop()
 
-    # --- Finalize position: neutral/zenith at EL=90 ---
+    # --- 3) Azimuth left ---
+    send_pelco_d(0x00, 0x04, 0x20, 0x00)  # Left
+    elapsed += _sleep_with_ticks(max(0.0, float(az_time)), "rotating azimuth fully left", elapsed, total_secs)
+    stop()
+
+    # Finalize position at neutral/zenith
     RotorState.set_position(0.0, 90.0)
 
-    # Emit a final update so UI can force-sync to AZ=0, EL=90 and close modal
-    msg = "✓ Calibration complete. Azimuth set to 0°, Elevation set to 90°."
-    _emit(msg)
-    return msg
-
+    # Emit final 100% + human message so UI force-syncs and closes
+    final_msg = "✓ Calibration complete. Azimuth set to 0°, Elevation set to 90°."
+    if update_callback:
+        update_callback({
+            "msg": final_msg,
+            "cal_stage": "complete",
+            "cal_progress": 1.0,
+        })
+    return final_msg
 
 def test_azimuth_speed(duration: int = 10) -> None:
     """Test azimuth speed by rotating right and measuring degrees."""

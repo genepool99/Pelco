@@ -51,22 +51,19 @@ app = Flask(__name__)
 socketio = SocketIO(app, async_mode="eventlet")
 
 
-def socketio_emit_position(msg: str | None = None) -> None:
-    """Emit the current rotor position via WebSocket (and an optional status message)."""
+def socketio_emit_position(msg=None):
+    """
+    Emit the current rotor position via WebSocket.
+    `msg` can be a string or a dict with additional fields (e.g., cal_progress).
+    """
     az, el = get_position()
     payload = {"az": az, "el": el}
-    last = get_last_request()
-    if last:
-        # include both the user's request and the applied targets
-        payload.update({
-            "req_az": last.get("req_az"),
-            "req_el": last.get("req_el"),
-            "target_az": last.get("target_az"),
-            "target_el": last.get("target_el"),
-            "clamped": bool(last.get("clamped", False)),
-        })
-    if msg:
+
+    if isinstance(msg, dict):
+        payload.update(msg)
+    elif isinstance(msg, str) and msg:
         payload["msg"] = msg
+
     socketio.emit("position", payload)
 
 
