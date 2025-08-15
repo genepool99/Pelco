@@ -21,7 +21,7 @@ eventlet.monkey_patch()
 from flask_socketio import SocketIO
 from flask import Flask, request
 
-from state import get_position, set_position, get_config, get_last_request
+from state import get_position, set_position, get_config
 from pelco_commands import (
     calibrate,
     run_demo_sequence,
@@ -121,7 +121,7 @@ def control():
         elif action == "nudge_down_big":
             msg = nudge_elevation(-1, 2.0, update_callback=socketio_emit_position)
 
-        # NEW: Azimuth helpers (backend parity with elevation)
+        # Azimuth helpers
         elif action == "az_zero":
             msg = set_azimuth_zero(update_callback=socketio_emit_position)
         elif action == "nudge_left":
@@ -191,4 +191,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

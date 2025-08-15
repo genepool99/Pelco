@@ -1,4 +1,4 @@
-"""Peltrack web UI HTML template (single-page, above-the-fold layout)."""
+"""Peltrack web UI HTML template (brand, favicon, fixed elevation labels, above-the-fold)."""
 
 __all__ = ["HTML_PAGE"]
 
@@ -11,6 +11,11 @@ HTML_PAGE = """
   <meta name="description" content="Peltrack: Pelco-D rotor controller web interface">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <!-- Inline SVG favicon (no 404) -->
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230b1220'/%3E%3Cg fill='none' stroke='%230ea5e9' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M32 14a10 10 0 0 1 10 10'/%3E%3Cpath d='M32 9a15 15 0 0 1 15 15'/%3E%3Cpath d='M32 4a20 20 0 0 1 20 20'/%3E%3C/g%3E%3Ccircle cx='32' cy='24' r='3' fill='%23ffffff'/%3E%3Crect x='30' y='28' width='4' height='22' rx='1.5' fill='%23ffffff'/%3E%3Crect x='26' y='50' width='12' height='4' rx='2' fill='%23ffffff'/%3E%3C/svg%3E" />
+
   <style>
     :root {
       --gap: 14px;
@@ -24,7 +29,7 @@ HTML_PAGE = """
       /* Sizes tuned for 100% zoom @ 1280×720 */
       --dial: 280px;      /* azimuth dial size */
       --bar-h: 280px;     /* elevation bar height */
-      --btn-h: 44px;      /* bigger touch area */
+      --btn-h: 44px;      /* larger touch area */
       --btn-font: 16px;
       --input-font: 18px;
 
@@ -53,8 +58,12 @@ HTML_PAGE = """
 
     /* Shell */
     .wrap { display: grid; gap: var(--gap); padding: var(--gap); max-width: 1200px; margin: 0 auto; }
-    header { display: grid; gap: 6px; }
-    h1 { margin: 0; font-size: 22px; }
+    header { display: grid; gap: 10px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon { width: 56px; height: 56px; flex: 0 0 auto; }
+    .brand-text .title { font-size: 26px; font-weight: 800; line-height: 1.1; }
+    .brand-text .subtitle { font-size: 14px; color: var(--muted); margin-top: 2px; }
+
     .status-line { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: baseline; }
     .muted { color: var(--muted); }
 
@@ -100,7 +109,6 @@ HTML_PAGE = """
     .btn-danger  { background: var(--danger);  color: var(--danger-fg);  border-color: var(--danger); }
     .btn-neutral { background: var(--neutral); color: var(--neutral-fg); border-color: var(--neutral); }
     .btn-secondary { background: var(--secondary); color: var(--secondary-fg); border-color: var(--border); }
-
     .btn-block { width: 100%; }
 
     /* Gauges */
@@ -115,7 +123,13 @@ HTML_PAGE = """
     .center { fill: #000; }
 
     .elevation { display: grid; justify-items: center; align-content: start; gap: 6px; }
-    .elevation svg { width: 90px; height: var(--bar-h); display: block; }
+    /* Wider SVG + overflow visible so labels never clip */
+    .elevation svg { width: 120px; height: var(--bar-h); display: block; overflow: visible; }
+
+    /* Progress bar */
+    .progress { width: 100%; height: 12px; background: #e5e7eb; border: 1px solid #cbd5e1; border-radius: 999px; overflow: hidden; }
+    .progress > .bar { width: 0%; height: 100%; background: #0ea5e9; transition: width 0.2s ease; }
+    #cal-stage-line { font-size: 13px; color: #334155; }
 
     /* Blocking modal for calibration */
     .modal {
@@ -137,13 +151,32 @@ HTML_PAGE = """
 <body>
   <div class="wrap">
     <header>
-      <h1>Peltrack Control Panel</h1>
+      <!-- Big brand/logo block -->
+      <div class="brand">
+        <!-- Inline logo: same visual language as the favicon, larger & horizontal -->
+        <svg class="brand-icon" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="32" cy="32" r="30" fill="#0b1220"></circle>
+          <g fill="none" stroke="#0ea5e9" stroke-width="3" stroke-linecap="round">
+            <path d="M32 14a10 10 0 0 1 10 10"></path>
+            <path d="M32 9a15 15 0 0 1 15 15"></path>
+            <path d="M32 4a20 20 0 0 1 20 20"></path>
+          </g>
+          <circle cx="32" cy="24" r="3" fill="#ffffff"></circle>
+          <rect x="30" y="28" width="4" height="22" rx="1.5" fill="#ffffff"></rect>
+          <rect x="26" y="50" width="12" height="4" rx="2" fill="#ffffff"></rect>
+        </svg>
+        <div class="brand-text">
+          <div class="title">Peltrack</div>
+          <div class="subtitle">Pelco-D Rotor Control</div>
+        </div>
+      </div>
+
       <div class="status-line">
         <div><strong>Status:</strong> <span id="msg" aria-live="polite">{{msg}}</span></div>
         <div><strong>AZ</strong> <span id="az">{{caz}}</span>°</div>
         <div><strong>EL</strong> <span id="el">{{cel}}</span>°</div>
         <div class="muted"><strong>Speed</strong> AZ {{az_speed}}°/s · EL {{el_speed}}°/s</div>
-        <!-- Requested vs actual (shows if backend provides req_* / clamped) -->
+        <!-- Optional “requested vs actual” UI; will populate only if backend sends fields -->
         <div><strong>Req AZ</strong> <span id="req-az">—</span>°</div>
         <div><strong>Req EL</strong> <span id="req-el">—</span>°</div>
         <span id="clamped" class="badge" style="display:none;">⚠︎ Clamped to limits</span>
@@ -197,7 +230,7 @@ HTML_PAGE = """
           <div class="readout"><div>Elevation</div><div class="big" id="el-display">{{cel}}</div></div>
         </div>
 
-        <div class="card" style="display:grid; grid-template-columns: var(--dial) 120px; gap: var(--gap); justify-content:center;">
+        <div class="card" style="display:grid; grid-template-columns: var(--dial) 140px; gap: var(--gap); justify-content:center;">
           <!-- Azimuth Dial -->
           <div class="azimuth" aria-label="Azimuth Dial">
             <svg id="az-svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet">
@@ -207,12 +240,12 @@ HTML_PAGE = """
             </svg>
           </div>
 
-          <!-- Elevation Bar -->
+          <!-- Elevation Panel (wider so labels don't clip) -->
           <div class="elevation" aria-label="Elevation Bar" style="align-items:center;">
-            <svg id="el-svg" width="90" height="300">
-              <rect x="20" y="0" width="50" height="300" fill="#f8fafc" stroke="#cbd5e1"/>
-              <rect id="el-fill" x="20" y="0" width="50" height="0" fill="#a7d3ff"/>
-              <line id="el-line" x1="20" x2="70" y1="150" y2="150" stroke="#1e66f5" stroke-width="2"/>
+            <svg id="el-svg" width="120" height="300" viewBox="0 0 120 300">
+              <rect x="20" y="0" width="60" height="300" fill="#f8fafc" stroke="#cbd5e1"/>
+              <rect id="el-fill" x="20" y="0" width="60" height="0" fill="#a7d3ff"/>
+              <line id="el-line" x1="20" x2="80" y1="150" y2="150" stroke="#1e66f5" stroke-width="2"/>
               <g id="el-ticks"></g>
             </svg>
           </div>
@@ -227,26 +260,34 @@ HTML_PAGE = """
   <div id="cal-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cal-title">
     <div class="modal-card">
       <h2 id="cal-title">Calibration in progress…</h2>
+      <div class="progress" aria-hidden="true"><div id="cal-bar" class="bar"></div></div>
+      <div id="cal-stage-line" aria-live="polite"></div>
       <div id="cal-log" class="log"></div>
       <button type="button" class="btn btn-neutral btn-block" onclick="closeCalibrationModal()">Hide</button>
     </div>
   </div>
 
   <script>
+  if (window.history.replaceState) {
+    window.history.replaceState(null, null, window.location.href);
+  }
+
   const form = document.getElementById('mainForm');
   const actionInput = document.getElementById('action');
   const azInput = document.querySelector('input[name="azimuth"]');
   const elInput = document.querySelector('input[name="elevation"]');
   const modal = document.getElementById('cal-modal');
   const logEl = document.getElementById('cal-log');
+  const bar = document.getElementById('cal-bar');
+  const stageLine = document.getElementById('cal-stage-line');
 
   function setAction(name) { actionInput.value = name; }
   async function postAction(name) {
     setAction(name);
     try {
       const fd = new FormData(form);
-      await fetch('/', { method: 'POST', body: fd });
-      // socket "position" event will update UI
+      await fetch('/', { method: 'POST', body: fd, credentials: 'same-origin' });
+      // Socket "position" event will update UI
     } catch (err) {
       console.error('POST failed', err);
     }
@@ -258,6 +299,7 @@ HTML_PAGE = """
     document.body.classList.add('dimmed');
     modal.classList.add('open');
     logEl.textContent = '';
+    setCalProgress(0, 'starting');
     if (modalCloseTimer) { clearTimeout(modalCloseTimer); modalCloseTimer = null; }
   }
   function closeCalibrationModal() {
@@ -269,7 +311,14 @@ HTML_PAGE = """
     postAction('calibrate');
   }
 
-  // Build compass ticks/labels (every 10°, label every 30° + cardinal letters)
+  function setCalProgress(pct, stage) {
+    const clamped = Math.max(0, Math.min(1, Number(pct) || 0));
+    bar.style.width = Math.round(clamped * 100) + '%';
+    if (stage) stageLine.textContent = 'Stage: ' + stage;
+    if (!modal.classList.contains('open')) openCalibrationModal();
+  }
+
+  // Build compass ticks/labels (every 10°, label every 30° + N/E/S/W)
   function buildAzimuthTicks() {
     const g = document.getElementById('az-ticks');
     const cx = 150, cy = 150, rOuter = 145;
@@ -316,18 +365,18 @@ HTML_PAGE = """
     });
     // Outer ring
     const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    ring.setAttribute("cx", 150); ring.setAttribute("cy", 150); ring.setAttribute("r", rOuter);
+    ring.setAttribute("cx", 150); ring.setAttribute("cy", 150); ring.setAttribute("r", 145);
     ring.setAttribute("fill", "none"); ring.setAttribute("stroke", "#cbd5e1"); ring.setAttribute("stroke-width", "1");
     g.appendChild(ring);
   }
 
-  // Elevation ticks: 45..135 step 15, labels on right
+  // Elevation ticks: 45..135 step 15, labels on right (wider SVG, no clipping)
   function buildElevationTicks() {
     const g = document.getElementById('el-ticks');
     const full = 300;
-    const x1 = 74, x2 = 82;
+    const x1 = 84, x2 = 92;           // tick lines
     for (let deg = 45; deg <= 135; deg += 15) {
-      const pct = 1 - (deg - 45) / 90;
+      const pct = 1 - (deg - 45) / 90;   // 1 at 45°, 0 at 135°
       const y = full - pct * full;
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
       line.setAttribute("x1", x1); line.setAttribute("x2", x2);
@@ -336,8 +385,9 @@ HTML_PAGE = """
       g.appendChild(line);
 
       const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      t.setAttribute("x", x2 + 4); t.setAttribute("y", y + 4);
+      t.setAttribute("x", x2 + 6); t.setAttribute("y", y + 4);
       t.setAttribute("font-size", "10");
+      t.setAttribute("text-anchor", "start");
       t.textContent = String(deg) + "°";
       g.appendChild(t);
     }
@@ -377,14 +427,20 @@ HTML_PAGE = """
   socket.on('position', (data) => {
     if ('az' in data) updateAzimuth(data.az);
     if ('el' in data) updateElevation(data.el);
+
+    if ('cal_progress' in data) {
+      setCalProgress(data.cal_progress, data.cal_stage || '');
+    }
+
     if ('msg' in data) {
       document.getElementById('msg').textContent = data.msg;
       // Calibration modal logging + forced sync on completion (fix EL=0 bug)
-      if (data.msg.startsWith('Calibrating:')) {
+      if (String(data.msg).startsWith('Calibrating:')) {
         openCalibrationModal();
         logEl.textContent += (data.msg + "\\n");
-      } else if (data.msg.includes('Calibration complete')) {
+      } else if (String(data.msg).includes('Calibration complete')) {
         logEl.textContent += (data.msg + "\\n");
+        setCalProgress(1, 'complete');
         // Force-sync EL=90° and AZ=0° in case any client missed the final state
         updateAzimuth(0);
         updateElevation(90);
@@ -393,7 +449,7 @@ HTML_PAGE = """
       }
     }
 
-    // Show last requested vs actual + clamped badge (if provided by backend)
+    // Optional: show requested/clamped info if backend provides it
     if ('req_az' in data) document.getElementById('req-az').textContent = Number(data.req_az).toFixed(1);
     if ('req_el' in data) document.getElementById('req-el').textContent = Number(data.req_el).toFixed(1);
     const badge = document.getElementById('clamped');

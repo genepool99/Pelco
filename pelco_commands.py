@@ -3,7 +3,7 @@
 Supports:
 - Manual and programmatic control
 - Estimated motion duration using configured speeds
-- Real-time updates via callback injection
+- Real-time updates via callback injection (dict or str payloads)
 """
 
 from __future__ import annotations
@@ -23,8 +23,10 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+# Callback payload may be a plain string or a dict with fields like
+#   { "msg": "...", "cal_progress": 0.42, "cal_stage": "moving fully down" }
 UpdatePayload = Union[str, Dict[str, Any]]
-UpdateCallback = Optional[Callable[[str], None]]
+UpdateCallback = Optional[Callable[[UpdatePayload], None]]
 
 # --------------------------------------------------------------------
 # Limits: load from limits.json with sensible fallbacks
@@ -35,6 +37,7 @@ _LIMITS_PATH = os.path.join(_THIS_DIR, "limits.json")
 
 
 def _load_limits() -> tuple[float, float, float, float]:
+    """Load az/el limits from limits.json with safe defaults."""
     az_min, az_max = 0.0, 360.0
     el_min, el_max = 45.0, 135.0
     try:
@@ -127,13 +130,15 @@ def _calculate_motion_time(delta: float, speed: float) -> float:
 # High-level motion
 # --------------------------------------------------------------------
 def send_command(
-    az_target: float, el_target: float, update_callback: UpdateCallback = None
+    az_target: float,
+    el_target: float,
+    update_callback: UpdateCallback = None,
 ) -> str:
     """Move rotor to the target azimuth and elevation.
 
     Targets are clamped to AZ[AZ_MIN,AZ_MAX], EL[ELEVATION_MIN,ELEVATION_MAX]
-    *before* timing is calculated so motion duration and stored state match
-    the actual mechanical move.
+    *before* timing is calculated so motion duration and stored state match the
+    actual mechanical move.
     """
     # Clamp EARLY to keep timing/state consistent with mechanical limits
     az_target = _clamp(float(az_target), AZ_MIN, AZ_MAX)
@@ -185,14 +190,19 @@ def send_command(
     # Store final (already clamped) position
     RotorState.set_position(az_target, el_target)
 
-    msg = f"Moved to az={az_target:.1f}, el={el_target:.1f} over ~{move_duration:.1f}s"
+    msg = (
+        f"Moved to az={az_target:.1f}, el={el_target:.1f} over "
+        f"~{move_duration:.1f}s"
+    )
     if update_callback:
         update_callback(msg)
     return msg
 
 
 def nudge_elevation(
-    direction: int, duration: float, update_callback: UpdateCallback = None
+    direction: int,
+    duration: float,
+    update_callback: UpdateCallback = None,
 ) -> str:
     """Briefly nudge elevation up (+1) or down (-1) for a duration in seconds."""
     if direction not in (-1, 1):
@@ -209,14 +219,19 @@ def nudge_elevation(
     new_el = _clamp(el + delta, ELEVATION_MIN, ELEVATION_MAX)
     RotorState.set_position(az, new_el)
 
-    msg = f"Nudged elevation {'up' if direction > 0 else 'down'} for {duration:.1f} seconds"
+    msg = (
+        "Nudged elevation "
+        f"{'up' if direction > 0 else 'down'} for {duration:.1f} seconds"
+    )
     if update_callback:
         update_callback(msg)
     return msg
 
 
 def nudge_azimuth(
-    direction: int, duration: float, update_callback: UpdateCallback = None
+    direction: int,
+    duration: float,
+    update_callback: UpdateCallback = None,
 ) -> str:
     """Briefly nudge azimuth right (+1) or left (-1) for a duration in seconds."""
     if direction not in (-1, 1):
@@ -234,7 +249,10 @@ def nudge_azimuth(
     new_az = _wrap_az(az + delta)
     RotorState.set_position(new_az, el)
 
-    msg = f"Nudged azimuth {'right' if direction > 0 else 'left'} for {duration:.1f} seconds"
+    msg = (
+        "Nudged azimuth "
+        f"{'right' if direction > 0 else 'left'} for {duration:.1f} seconds"
+    )
     if update_callback:
         update_callback(msg)
     return msg
@@ -253,32 +271,41 @@ def set_horizon(update_callback: UpdateCallback = None) -> str:
 
 
 # --------------------------------------------------------------------
-# Calibration & tests
+# Calibration & tests (with live progress)
 # --------------------------------------------------------------------
 def calibrate(update_callback: UpdateCallback = None) -> str:
-    """
-    Calibrate both azimuth and elevation with live progress:
+    """Calibrate both azimuth and elevation with live progress updates.
+
+    Stages:
       1) Tilt fully down
       2) Tilt up by configured degrees
       3) Rotate azimuth fully left
-    Progress fields:
+
+    Progress fields (in dict payloads via update_callback):
       - cal_progress: float in [0..1]
-      - cal_stage: str label for current stage
+      - cal_stage:    str label for current stage
     """
     def _emit_progress(stage: str, elapsed_s: float, total_s: float) -> None:
         pct = 1.0 if total_s <= 0 else max(0.0, min(1.0, elapsed_s / total_s))
         if update_callback:
-            update_callback({
-                "msg": f"Calibrating: {stage}… {int(pct*100)}%",
-                "cal_stage": stage,
-                "cal_progress": pct,
-            })
+            update_callback(
+                {
+                    "msg": f"Calibrating: {stage}… {int(pct * 100)}%",
+                    "cal_stage": stage,
+                    "cal_progress": pct,
+                }
+            )
 
-    def _sleep_with_ticks(duration: float, stage: str, elapsed_so_far: float,
-                          total: float, interval: float = 0.25) -> float:
+    def _sleep_with_ticks(
+        duration: float,
+        stage: str,
+        elapsed_so_far: float,
+        total: float,
+        interval: float = 0.25,
+    ) -> float:
         """Sleep in small chunks and emit progress ticks."""
         start = time.time()
-        # emit immediately (t=0) so the bar moves at stage start
+        # emit immediately so the bar moves at stage start
         _emit_progress(stage, elapsed_so_far, total)
         while True:
             now = time.time()
@@ -297,45 +324,70 @@ def calibrate(update_callback: UpdateCallback = None) -> str:
     az_time = _get_config_with_default("CALIBRATE_AZ_LEFT_DURATION_SEC", 40)
 
     up_secs = float(up_degrees) / el_speed if el_speed and el_speed > 0 else 0.0
-    total_secs = max(0.0, float(down_time)) + max(0.0, up_secs) + max(0.0, float(az_time))
+    total_secs = (
+        max(0.0, float(down_time)) +
+        max(0.0, up_secs) +
+        max(0.0, float(az_time))
+    )
     elapsed = 0.0
 
     logging.info(
-        "Starting calibration with down_time=%.1fs, up_degrees=%s (%.1fs), az_time=%.1fs",
-        down_time, up_degrees, up_secs, az_time
+        "Starting calibration: down=%.1fs, up=%sdeg(%.1fs), az_left=%.1fs",
+        down_time,
+        up_degrees,
+        up_secs,
+        az_time,
     )
 
     # --- 1) Elevation down ---
     send_pelco_d(0x00, 0x10, 0x00, 0x20)  # Down
-    elapsed += _sleep_with_ticks(max(0.0, float(down_time)), "moving fully down", elapsed, total_secs)
+    elapsed += _sleep_with_ticks(
+        max(0.0, float(down_time)),
+        "moving fully down",
+        elapsed,
+        total_secs,
+    )
     stop()
 
     # --- 2) Elevation up ---
     send_pelco_d(0x00, 0x08, 0x00, 0x20)  # Up
-    elapsed += _sleep_with_ticks(max(0.0, float(up_secs)), f"tilting up ~{up_degrees}°", elapsed, total_secs)
+    elapsed += _sleep_with_ticks(
+        max(0.0, float(up_secs)),
+        f"tilting up ~{up_degrees}°",
+        elapsed,
+        total_secs,
+    )
     stop()
 
     # --- 3) Azimuth left ---
     send_pelco_d(0x00, 0x04, 0x20, 0x00)  # Left
-    elapsed += _sleep_with_ticks(max(0.0, float(az_time)), "rotating azimuth fully left", elapsed, total_secs)
+    elapsed += _sleep_with_ticks(
+        max(0.0, float(az_time)),
+        "rotating azimuth fully left",
+        elapsed,
+        total_secs,
+    )
     stop()
 
     # Finalize position at neutral/zenith
     RotorState.set_position(0.0, 90.0)
 
     # Emit final 100% + human message so UI force-syncs and closes
-    final_msg = "✓ Calibration complete. Azimuth set to 0°, Elevation set to 90°."
+    final_msg = (
+        "✓ Calibration complete. "
+        "Azimuth set to 0°, Elevation set to 90°."
+    )
     if update_callback:
-        update_callback({
-            "msg": final_msg,
-            "cal_stage": "complete",
-            "cal_progress": 1.0,
-        })
+        update_callback({"msg": final_msg, "cal_stage": "complete", "cal_progress": 1.0})
     return final_msg
+
 
 def test_azimuth_speed(duration: int = 10) -> None:
     """Test azimuth speed by rotating right and measuring degrees."""
-    logging.info("Rotating right for %d seconds. Measure degrees moved.", duration)
+    logging.info(
+        "Rotating right for %d seconds. Measure degrees moved.",
+        duration,
+    )
     send_pelco_d(0x00, 0x02, 0x20, 0x00)
     time.sleep(duration)
     stop()
@@ -350,7 +402,10 @@ def test_azimuth_speed(duration: int = 10) -> None:
 
 def test_elevation_speed(duration: int = 10) -> None:
     """Test elevation speed by tilting up and measuring degrees."""
-    logging.info("Tilting up for %d seconds. Measure degrees moved.", duration)
+    logging.info(
+        "Tilting up for %d seconds. Measure degrees moved.",
+        duration,
+    )
     send_pelco_d(0x00, 0x08, 0x00, 0x20)
     time.sleep(duration)
     stop()
