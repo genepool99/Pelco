@@ -1,4 +1,4 @@
-"""Peltrack web UI HTML template (compass icon, fixed elevation labels, above-the-fold)."""
+"""Peltrack web UI HTML template (full-range elevation with limit markers + limits in header)."""
 
 __all__ = ["HTML_PAGE"]
 
@@ -28,7 +28,7 @@ HTML_PAGE = """
 
       /* Sizes tuned for 100% zoom @ 1280×720 */
       --dial: 280px;      /* azimuth dial size */
-      --bar-h: 300px;     /* elevation bar height */
+      --bar-h: 300px;     /* elevation bar height (SVG viewBox height) */
       --btn-h: 44px;      /* larger touch area */
       --btn-font: 16px;
       --input-font: 18px;
@@ -54,7 +54,7 @@ HTML_PAGE = """
 
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); background: #fafbfc; }
 
     /* Shell */
     .wrap { display: grid; gap: var(--gap); padding: var(--gap); max-width: 1200px; margin: 0 auto; }
@@ -97,16 +97,12 @@ HTML_PAGE = """
     }
     input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-    .btn {
-      cursor: pointer; height: var(--btn-h); border: 1px solid var(--border);
-      background: #fff; border-radius: 10px; font-size: var(--btn-font); padding: 0 14px;
-    }
+    .btn { cursor: pointer; height: var(--btn-h); border: 1px solid var(--border); background: #fff; border-radius: 10px; font-size: var(--btn-font); padding: 0 14px; }
     .btn:hover { filter: brightness(0.98); }
-
     .btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
     .btn-accent  { background: var(--accent);  color: var(--accent-fg);  border-color: var(--accent); }
     .btn-warning { background: var(--warning); color: var(--warning-fg); border-color: var(--warning); }
-    .btn-danger  { background: var(--danger);  color: var(--danger-fg);  border-color: var(--danger); }
+    .btn-danger  { background: var(--danger);  color: var(--danger-fg); border-color: var(--danger); }
     .btn-neutral { background: var(--neutral); color: var(--neutral-fg); border-color: var(--neutral); }
     .btn-secondary { background: var(--secondary); color: var(--secondary-fg); border-color: var(--border); }
     .btn-block { width: 100%; }
@@ -124,7 +120,7 @@ HTML_PAGE = """
 
     .elevation { display: grid; justify-items: center; align-content: start; gap: 6px; }
     /* Wider SVG + overflow visible so labels never clip */
-    .elevation svg { width: 140px; height: var(--bar-h); display: block; overflow: visible; }
+    .elevation svg { width: 160px; height: var(--bar-h); display: block; overflow: visible; }
 
     /* Progress bar */
     .progress { width: 100%; height: 12px; background: #e5e7eb; border: 1px solid #cbd5e1; border-radius: 999px; overflow: hidden; }
@@ -132,16 +128,9 @@ HTML_PAGE = """
     #cal-stage-line { font-size: 13px; color: #334155; }
 
     /* Blocking modal for calibration */
-    .modal {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-      display: none; align-items: center; justify-content: center; z-index: 9999;
-    }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 9999; }
     .modal.open { display: flex; }
-    .modal-card {
-      width: min(520px, 92vw); max-height: 80vh; overflow: auto;
-      background: #fff; border-radius: 12px; border: 1px solid var(--border);
-      padding: 16px; display: grid; gap: 10px;
-    }
+    .modal-card { width: min(520px, 92vw); max-height: 80vh; overflow: auto; background: #fff; border-radius: 12px; border: 1px solid var(--border); padding: 16px; display: grid; gap: 10px; }
     .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; white-space: pre-wrap; background: #f8fafc; border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
 
     .footer { text-align: center; font-size: 12px; color: var(--muted); }
@@ -176,7 +165,7 @@ HTML_PAGE = """
         <div><strong>AZ</strong> <span id="az">{{caz}}</span>°</div>
         <div><strong>EL</strong> <span id="el">{{cel}}</span>°</div>
         <div class="muted"><strong>Speed</strong> AZ {{az_speed}}°/s · EL {{el_speed}}°/s</div>
-        <!-- Optional: requested vs actual if backend provides req_* / clamped -->
+        <div class="muted"><strong>Limits</strong> AZ [<span id="lim-az-min">{{az_min}}</span>–<span id="lim-az-max">{{az_max}}</span>] · EL [<span id="lim-el-min">{{el_min}}</span>–<span id="lim-el-max">{{el_max}}</span>]</div>
         <div><strong>Req AZ</strong> <span id="req-az">—</span>°</div>
         <div><strong>Req EL</strong> <span id="req-el">—</span>°</div>
         <span id="clamped" class="badge" style="display:none;">⚠︎ Clamped to limits</span>
@@ -230,7 +219,7 @@ HTML_PAGE = """
           <div class="readout"><div>Elevation</div><div class="big" id="el-display">{{cel}}</div></div>
         </div>
 
-        <div class="card" style="display:grid; grid-template-columns: var(--dial) 160px; gap: var(--gap); justify-content:center;">
+        <div class="card" style="display:grid; grid-template-columns: var(--dial) 180px; gap: var(--gap); justify-content:center;">
           <!-- Azimuth Dial -->
           <div class="azimuth" aria-label="Azimuth Dial">
             <svg id="az-svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet">
@@ -240,13 +229,23 @@ HTML_PAGE = """
             </svg>
           </div>
 
-          <!-- Elevation Panel (wider so labels don't clip) -->
+          <!-- Elevation Panel: 0..180° full-range with limit band/markers -->
           <div class="elevation" aria-label="Elevation Bar" style="align-items:center;">
-            <svg id="el-svg" width="140" height="300" viewBox="0 0 140 300">
-              <rect x="30" y="0" width="60" height="300" fill="#f8fafc" stroke="#cbd5e1"/>
-              <rect id="el-fill" x="30" y="0" width="60" height="0" fill="#a7d3ff"/>
-              <line id="el-line" x1="30" x2="90" y1="150" y2="150" stroke="#1e66f5" stroke-width="2"/>
+            <svg id="el-svg" width="160" height="300" viewBox="0 0 160 300">
+              <!-- Bar background -->
+              <rect x="40" y="0" width="60" height="300" fill="#f8fafc" stroke="#cbd5e1"/>
+              <!-- Allowed band (drawn by JS based on limits) -->
+              <rect id="el-allowed" x="40" y="0" width="60" height="0" fill="#86efac" fill-opacity="0.35" stroke="none"/>
+              <!-- Current fill -->
+              <rect id="el-fill" x="40" y="300" width="60" height="0" fill="#a7d3ff"/>
+              <!-- Current position line -->
+              <line id="el-line" x1="40" x2="100" y1="150" y2="150" stroke="#1e66f5" stroke-width="2"/>
+              <!-- Limits (dashed) + labels -->
+              <line id="el-min-line" x1="40" x2="100" y1="0"  y2="0"  stroke="#16a34a" stroke-width="2" stroke-dasharray="5 4"/>
+              <line id="el-max-line" x1="40" x2="100" y1="0"  y2="0"  stroke="#16a34a" stroke-width="2" stroke-dasharray="5 4"/>
               <g id="el-ticks"></g>
+              <text id="el-min-label" x="106" y="0" font-size="10" dominant-baseline="middle" text-anchor="start" fill="#065f46"></text>
+              <text id="el-max-label" x="106" y="0" font-size="10" dominant-baseline="middle" text-anchor="start" fill="#065f46"></text>
             </svg>
           </div>
         </div>
@@ -268,9 +267,7 @@ HTML_PAGE = """
   </div>
 
   <script>
-  if (window.history.replaceState) {
-    window.history.replaceState(null, null, window.location.href);
-  }
+  if (window.history.replaceState) { window.history.replaceState(null, null, window.location.href); }
 
   const form = document.getElementById('mainForm');
   const actionInput = document.getElementById('action');
@@ -281,16 +278,19 @@ HTML_PAGE = """
   const bar = document.getElementById('cal-bar');
   const stageLine = document.getElementById('cal-stage-line');
 
+  // Limits (injected by backend)
+  const AZ_MIN = Number("{{az_min}}");
+  const AZ_MAX = Number("{{az_max}}");
+  const EL_MIN = Number("{{el_min}}");
+  const EL_MAX = Number("{{el_max}}");
+
   function setAction(name) { actionInput.value = name; }
   async function postAction(name) {
     setAction(name);
     try {
       const fd = new FormData(form);
       await fetch('/', { method: 'POST', body: fd, credentials: 'same-origin' });
-      // Socket "position" event will update UI
-    } catch (err) {
-      console.error('POST failed', err);
-    }
+    } catch (err) { console.error('POST failed', err); }
   }
 
   // Calibration modal helpers
@@ -306,10 +306,7 @@ HTML_PAGE = """
     modal.classList.remove('open');
     document.body.classList.remove('dimmed');
   }
-  function startCalibration() {
-    openCalibrationModal();
-    postAction('calibrate');
-  }
+  function startCalibration() { openCalibrationModal(); postAction('calibrate'); }
 
   function setCalProgress(pct, stage) {
     const clamped = Math.max(0, Math.min(1, Number(pct) || 0));
@@ -350,7 +347,6 @@ HTML_PAGE = """
         g.appendChild(t);
       }
     }
-    // Cardinal letters
     const labels = [{d:0,txt:'N'},{d:90,txt:'E'},{d:180,txt:'S'},{d:270,txt:'W'}];
     labels.forEach(({d,txt}) => {
       const rad = d * Math.PI / 180;
@@ -363,34 +359,64 @@ HTML_PAGE = """
       t.textContent = txt;
       g.appendChild(t);
     });
-    // Outer ring
     const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     ring.setAttribute("cx", 150); ring.setAttribute("cy", 150); ring.setAttribute("r", 145);
     ring.setAttribute("fill", "none"); ring.setAttribute("stroke", "#cbd5e1"); ring.setAttribute("stroke-width", "1");
     g.appendChild(ring);
   }
 
-  // Elevation ticks: 45..135 step 15, labels on right (wider SVG, no clipping)
+  // Map elevation deg (0..180) to SVG y (0..full) where 0° is bottom of bar
+  function mapElToY(deg) {
+    const full = 300; // viewBox height
+    const d = Math.max(0, Math.min(180, Number(deg) || 0));
+    const h = (d / 180) * full;     // 0..300
+    return full - h;                 // y from top
+  }
+
+  // Build elevation ticks 0..180 (step 10, label every 30) + allowed band/markers
   function buildElevationTicks() {
     const g = document.getElementById('el-ticks');
     const full = 300;
-    const x1 = 100, x2 = 110;          // tick lines inside 140-wide viewBox
-    for (let deg = 45; deg <= 135; deg += 15) {
-      const pct = 1 - (deg - 45) / 90;   // 1 at 45°, 0 at 135°
-      const y = full - pct * full;
+    const x1 = 105, x2 = 115;  // tick lines to the right of the bar (bar is x 40..100)
+    for (let deg = 0; deg <= 180; deg += 10) {
+      const y = mapElToY(deg);
+      const isMajor = (deg % 30) === 0;
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", x1); line.setAttribute("x2", x2);
-      line.setAttribute("y1", y);  line.setAttribute("y2", y);
-      line.setAttribute("stroke", "#94a3b8"); line.setAttribute("stroke-width", "2");
+      line.setAttribute("x1", isMajor ? x1-5 : x1); line.setAttribute("x2", x2);
+      line.setAttribute("y1", y); line.setAttribute("y2", y);
+      line.setAttribute("stroke", "#94a3b8"); line.setAttribute("stroke-width", isMajor ? "2" : "1");
       g.appendChild(line);
 
-      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      t.setAttribute("x", x2 + 6); t.setAttribute("y", y + 4);
-      t.setAttribute("font-size", "10");
-      t.setAttribute("text-anchor", "start");
-      t.textContent = String(deg) + "°";
-      g.appendChild(t);
+      if (isMajor) {
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", x2 + 6); t.setAttribute("y", y + 4);
+        t.setAttribute("font-size", "10");
+        t.setAttribute("text-anchor", "start");
+        t.textContent = String(deg) + "°";
+        g.appendChild(t);
+      }
     }
+
+    // Allowed band & limit lines/labels
+    const yMin = mapElToY(EL_MIN);
+    const yMax = mapElToY(EL_MAX);
+    const top = Math.min(yMin, yMax);
+    const height = Math.abs(yMin - yMax);
+
+    const allowed = document.getElementById('el-allowed');
+    allowed.setAttribute('y', top); allowed.setAttribute('height', height);
+
+    const minLine = document.getElementById('el-min-line');
+    const maxLine = document.getElementById('el-max-line');
+    minLine.setAttribute('y1', yMin); minLine.setAttribute('y2', yMin);
+    maxLine.setAttribute('y1', yMax); maxLine.setAttribute('y2', yMax);
+
+    const minLab = document.getElementById('el-min-label');
+    const maxLab = document.getElementById('el-max-label');
+    minLab.setAttribute('y', yMin);
+    maxLab.setAttribute('y', yMax);
+    minLab.textContent = "EL min " + EL_MIN + "°";
+    maxLab.textContent = "EL max " + EL_MAX + "°";
   }
 
   // Visual updates
@@ -404,22 +430,25 @@ HTML_PAGE = """
     line.setAttribute('y2', y);
     document.getElementById('az').textContent = angle.toFixed(1);
     document.getElementById('az-display').textContent = angle.toFixed(1);
-    azInput.value = angle.toFixed(1); // keep input synced
+    azInput.value = angle.toFixed(1);
   }
 
   function updateElevation(el) {
-    const clamped = Math.max(45, Math.min(135, el));
-    const full = 300; // SVG height
-    const pct = 1 - (clamped - 45) / 90; // 1 @45°, 0 @135°
-    const h = pct * full;
-    const y = full - h;
-    document.getElementById('el-fill').setAttribute('y', y);
-    document.getElementById('el-fill').setAttribute('height', h);
-    document.getElementById('el-line').setAttribute('y1', y);
-    document.getElementById('el-line').setAttribute('y2', y);
-    document.getElementById('el').textContent = el.toFixed(1);
-    document.getElementById('el-display').textContent = el.toFixed(1);
-    elInput.value = el.toFixed(1); // keep input synced
+    const y = mapElToY(el);
+    const full = 300;
+    const h = full - y;
+
+    const fill = document.getElementById('el-fill');
+    fill.setAttribute('y', y);
+    fill.setAttribute('height', h);
+
+    const line = document.getElementById('el-line');
+    line.setAttribute('y1', y);
+    line.setAttribute('y2', y);
+
+    document.getElementById('el').textContent = Number(el).toFixed(1);
+    document.getElementById('el-display').textContent = Number(el).toFixed(1);
+    elInput.value = Number(el).toFixed(1);
   }
 
   // Socket wiring
@@ -428,38 +457,29 @@ HTML_PAGE = """
     if ('az' in data) updateAzimuth(data.az);
     if ('el' in data) updateElevation(data.el);
 
-    if ('cal_progress' in data) {
-      setCalProgress(data.cal_progress, data.cal_stage || '');
-    }
+    if ('cal_progress' in data) { setCalProgress(data.cal_progress, data.cal_stage || ''); }
 
     if ('msg' in data) {
       document.getElementById('msg').textContent = data.msg;
-      // Calibration modal logging + forced sync on completion (fix EL=0 bug)
       if (String(data.msg).startsWith('Calibrating:')) {
-        openCalibrationModal();
-        logEl.textContent += (data.msg + "\\n");
+        openCalibrationModal(); logEl.textContent += (data.msg + "\\n");
       } else if (String(data.msg).includes('Calibration complete')) {
         logEl.textContent += (data.msg + "\\n");
         setCalProgress(1, 'complete');
-        // Force-sync EL=90° and AZ=0° in case any client missed the final state
-        updateAzimuth(0);
-        updateElevation(90);
+        updateAzimuth(0); updateElevation(90);
         if (modalCloseTimer) clearTimeout(modalCloseTimer);
         modalCloseTimer = setTimeout(closeCalibrationModal, 2500);
       }
     }
 
-    // Optional: show requested/clamped info if backend provides it
     if ('req_az' in data) document.getElementById('req-az').textContent = Number(data.req_az).toFixed(1);
     if ('req_el' in data) document.getElementById('req-el').textContent = Number(data.req_el).toFixed(1);
     const badge = document.getElementById('clamped');
     if ('clamped' in data && data.clamped) { badge.style.display = 'inline-block'; } else { badge.style.display = 'none'; }
   });
 
-  // Intercept Enter on inputs to use fetch
   form.addEventListener('submit', (e) => { e.preventDefault(); postAction('set'); });
 
-  // Build tick marks once
   document.addEventListener('DOMContentLoaded', () => {
     buildAzimuthTicks();
     buildElevationTicks();

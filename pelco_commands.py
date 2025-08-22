@@ -73,6 +73,32 @@ def _wrap_az(az: float) -> float:
     wrapped = az % 360.0
     return _clamp(wrapped, AZ_MIN, AZ_MAX)
 
+def _pelco_move_axes(az_dir: int, el_dir: int,
+                     pan_speed: int = 0x20, tilt_speed: int = 0x20) -> None:
+    """
+    Issue a Pelco-D frame that moves only the axes requested.
+      az_dir: -1 left, 0 none, +1 right
+      el_dir: -1 down, 0 none, +1 up
+    Speeds are only applied to the axes that are moving; the other axis gets 0.
+    """
+    cmd2 = 0
+    if az_dir > 0:
+        cmd2 |= 0x02  # right
+    elif az_dir < 0:
+        cmd2 |= 0x04  # left
+    if el_dir > 0:
+        cmd2 |= 0x08  # up
+    elif el_dir < 0:
+        cmd2 |= 0x10  # down
+
+    if cmd2 == 0:
+        stop()
+        return
+
+    data1 = pan_speed if az_dir != 0 else 0x00  # pan speed byte
+    data2 = tilt_speed if el_dir != 0 else 0x00  # tilt speed byte
+    send_pelco_d(0x00, cmd2, data1, data2)
+
 
 # --------------------------------------------------------------------
 # Serial / Pelco-D primitives
@@ -129,75 +155,74 @@ def _calculate_motion_time(delta: float, speed: float) -> float:
 # --------------------------------------------------------------------
 # High-level motion
 # --------------------------------------------------------------------
-def send_command(
-    az_target: float,
-    el_target: float,
-    update_callback: UpdateCallback = None,
-) -> str:
-    """Move rotor to the target azimuth and elevation.
-
-    Targets are clamped to AZ[AZ_MIN,AZ_MAX], EL[ELEVATION_MIN,ELEVATION_MAX]
-    *before* timing is calculated so motion duration and stored state match the
-    actual mechanical move.
+def send_command(az_target: float, el_target: float,
+                 update_callback: UpdateCallback = None) -> str:
     """
-    # Clamp EARLY to keep timing/state consistent with mechanical limits
+    Move rotor to target azimuth/elevation with axis-safe timing:
+    - Start both axes if both need motion.
+    - After the shorter axis finishes, continue only the longer axis.
+    - Stop, then set final position.
+    """
     az_target = _clamp(float(az_target), AZ_MIN, AZ_MAX)
     el_target = _clamp(float(el_target), ELEVATION_MIN, ELEVATION_MAX)
 
-    logging.info("Moving to AZ=%.1f°, EL=%.1f°", az_target, el_target)
     az_current, el_current = RotorState.get_position()
     az_delta = az_target - az_current
     el_delta = el_target - el_current
+    if az_delta == 0 and el_delta == 0:
+        msg = "No movement needed"
+        if update_callback:
+            update_callback(msg)
+        return msg
 
     az_speed = _get_config_with_default("AZIMUTH_SPEED_DPS", 10.0)
     el_speed = _get_config_with_default("ELEVATION_SPEED_DPS", 5.0)
 
     az_time = _calculate_motion_time(az_delta, az_speed)
     el_time = _calculate_motion_time(el_delta, el_speed)
-    move_duration = max(az_time, el_time)
 
-    if move_duration == 0:
-        # Update state anyway to the clamped target (no-op moves or tiny deltas)
+    # Direction flags
+    az_dir = 1 if az_delta > 0 else (-1 if az_delta < 0 else 0)
+    el_dir = 1 if el_delta > 0 else (-1 if el_delta < 0 else 0)
+
+    # If both axes move, run them together for the shorter time,
+    # then continue the longer axis alone.
+    try:
+        if az_dir != 0 and el_dir != 0:
+            # start both
+            _pelco_move_axes(az_dir, el_dir)
+            first = min(az_time, el_time)
+            time.sleep(first)
+
+            # continue only the axis that still has time left
+            if az_time > el_time:
+                _pelco_move_axes(az_dir, 0)         # pan only
+                time.sleep(az_time - el_time)
+            elif el_time > az_time:
+                _pelco_move_axes(0, el_dir)         # tilt only
+                time.sleep(el_time - az_time)
+
+            stop()
+        elif az_dir != 0:
+            _pelco_move_axes(az_dir, 0)
+            time.sleep(az_time)
+            stop()
+        else:
+            _pelco_move_axes(0, el_dir)
+            time.sleep(el_time)
+            stop()
+
+        # small mechanical settle
+        time.sleep(0.05)
+
+    finally:
+        # Update in-memory position to the commanded (clamped) target
         RotorState.set_position(az_target, el_target)
-        msg = "No movement needed"
-        if update_callback:
-            update_callback(msg)
-        return msg
 
-    # Build direction byte
-    cmd2 = 0
-    if az_delta > 0:
-        cmd2 |= 0x02  # Right
-    elif az_delta < 0:
-        cmd2 |= 0x04  # Left
-    if el_delta > 0:
-        cmd2 |= 0x08  # Up
-    elif el_delta < 0:
-        cmd2 |= 0x10  # Down
-
-    logging.debug(
-        "Moving: Δaz=%.1f°, Δel=%.1f°, est. duration=%.2fs",
-        az_delta,
-        el_delta,
-        move_duration,
-    )
-
-    # Start motion at fixed speed (0x20 is a common mid/fast step)
-    send_pelco_d(0x00, cmd2, 0x20, 0x20)
-    time.sleep(move_duration)
-    stop()
-
-    # Store final (already clamped) position
-    RotorState.set_position(az_target, el_target)
-
-    msg = (
-        f"Moved to az={az_target:.1f}, el={el_target:.1f} over "
-        f"~{move_duration:.1f}s"
-    )
+    msg = f"Moved to az={az_target:.1f}, el={el_target:.1f}"
     if update_callback:
         update_callback(msg)
     return msg
-
 
 def nudge_elevation(
     direction: int,
@@ -419,15 +444,20 @@ def test_elevation_speed(duration: int = 10) -> None:
 
 
 def run_demo_sequence(update_callback: UpdateCallback = None) -> None:
-    """Run a fixed set of positions to demo rotor movement."""
+    """Run a fixed set of positions to demo rotor movement, with brief settles."""
     steps = [
-        (0, 90),
-        (90, 60),
+        (0,   90),
+        (80,  60),
         (180, 45),
-        (270, 70),
-        (0, 90),
+        (270, 135),
+        (0,   90),
     ]
     for az, el in steps:
         send_command(az, el, update_callback=update_callback)
+        time.sleep(0.25)  # brief settle between steps
+
+    # One last ensure at neutral in case of tiny timing drift on some heads
+    send_command(0, 90, update_callback=update_callback)
+
     if update_callback:
         update_callback("Demo sequence completed.")

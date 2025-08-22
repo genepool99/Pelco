@@ -81,6 +81,10 @@ def index():
     html = html.replace("{{cel}}", f"{el:.1f}")
     html = html.replace("{{az_speed}}", f"{az_speed:.1f}")
     html = html.replace("{{el_speed}}", f"{el_speed:.1f}")
+    html = html.replace("{{az_min}}", f"{LIMITS['az_min']}")
+    html = html.replace("{{az_max}}", f"{LIMITS['az_max']}")
+    html = html.replace("{{el_min}}", f"{LIMITS['el_min']}")
+    html = html.replace("{{el_max}}", f"{LIMITS['el_max']}")
     return html
 
 
@@ -161,6 +165,10 @@ def control():
     html = html.replace("{{cel}}", f"{el:.1f}")
     html = html.replace("{{az_speed}}", f"{az_speed:.1f}")
     html = html.replace("{{el_speed}}", f"{el_speed:.1f}")
+    html = html.replace("{{az_min}}", f"{LIMITS['az_min']}")
+    html = html.replace("{{az_max}}", f"{LIMITS['az_max']}")
+    html = html.replace("{{el_min}}", f"{LIMITS['el_min']}")
+    html = html.replace("{{el_max}}", f"{LIMITS['el_max']}")
     return html
 
 
