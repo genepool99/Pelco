@@ -35,6 +35,23 @@ _LIMITS_PATH = os.path.join(_THIS_DIR, "limits.json")
 _motion_lock = threading.RLock()
 _cancel_event = threading.Event()
 
+__all__ = [
+    "init_serial",
+    "send_pelco_d",
+    "stop",
+    "send_command",
+    "nudge_elevation",
+    "nudge_azimuth",
+    "set_azimuth_zero",
+    "set_elevation_neutral",
+    "calibrate",
+    "test_azimuth_speed",
+    "test_elevation_speed",
+    "run_demo_sequence",
+    # helpers that UI/server may use:
+    "el_user_to_phys",
+    "el_phys_to_user",
+]
 
 # --------------------------- Helpers / limits ---------------------------
 
@@ -81,6 +98,70 @@ AZ_MIN, AZ_MAX, ELEVATION_MIN, ELEVATION_MAX = _load_limits()
 def _clamp(v: float, lo: float, hi: float) -> float:
     """Clamp v into [lo, hi]."""
     return max(lo, min(hi, v))
+
+
+def _breakaway_tilt(direction: int) -> None:
+    """Give the tilt axis a short, high-speed pulse to overcome stiction.
+
+    The pulse is NOT counted toward progress timing.
+    """
+    if direction not in (-1, 1):
+        return
+
+    near_deg = float(_get_config_with_default("EL_NEAR_STOP_DEG", 8.0))
+    kick_up = float(_get_config_with_default("EL_BREAKAWAY_SEC_UP", 0.6))
+    kick_dn = float(_get_config_with_default("EL_BREAKAWAY_SEC_DOWN", 0.4))
+    kick_spd = int(_get_config_with_default("EL_BREAKAWAY_SPEED_BYTE", 0x3F))
+
+    _, el = RotorState.get_position()
+    near_low = el <= (ELEVATION_MIN + near_deg)
+    near_high = el >= (ELEVATION_MAX - near_deg)
+
+    sec = 0.0
+    if direction > 0 and near_low:
+        sec = max(0.0, kick_up)
+    elif direction < 0 and near_high:
+        sec = max(0.0, kick_dn)
+
+    if sec > 0.0:
+        _pelco_move_axes(0, direction, tilt_speed=kick_spd)
+        _sleep_with_cancel(sec)
+        _stop_motor()
+
+
+def _effective_el_speed(direction: int) -> float:
+    """Return an adjusted elevation speed to account for gravity/drag near stops."""
+    base = _get_config_with_default("ELEVATION_SPEED_DPS", 5.0)
+    factor_up_near = float(_get_config_with_default("EL_UP_NEAR_STOP_FACTOR", 0.90))
+    factor_down_near = float(_get_config_with_default("EL_DOWN_NEAR_STOP_FACTOR", 0.95))
+    near_deg = float(_get_config_with_default("EL_NEAR_STOP_DEG", 8.0))
+
+    _, el = RotorState.get_position()
+    near_low = el <= (ELEVATION_MIN + near_deg)
+    near_high = el >= (ELEVATION_MAX - near_deg)
+
+    if direction > 0 and near_low:
+        return base * factor_up_near
+    if direction < 0 and near_high:
+        return base * factor_down_near
+    return base
+
+# --- Elevation reference mapping --------------------------------------------
+
+def _el_mode() -> str:
+    """Return configured elevation reference mode."""
+    m = RotorState.get_config("EL_REFERENCE")
+    return str(m or "VERTICAL").upper()
+
+
+def el_user_to_phys(el_ui: float) -> float:
+    """Map UI elevation to physical elevation."""
+    return el_ui + 90.0 if _el_mode() == "HORIZONTAL" else el_ui
+
+
+def el_phys_to_user(el_phys: float) -> float:
+    """Map physical elevation to UI elevation."""
+    return el_phys - 90.0 if _el_mode() == "HORIZONTAL" else el_phys
 
 
 # ------------------------ Serial / Pelco-D primitives ------------------------
@@ -199,59 +280,95 @@ def send_command(
     el_target: float,
     update_callback: UpdateCallback = None,
 ) -> str:
-    """Move rotor to target az/el with safe axis-staggered timing.
-
-    Guarantees:
-    - Motion is serialized via a global lock (no overlapping moves).
-    - Cancel-aware sleeps so STOP updates partial progress correctly.
-    - Targets are clamped before timing, so state matches the mechanical move.
-    """
+    """Move rotor to target az/el with safe axis-staggered timing + stiction handling."""
     with _motion_lock:
         _cancel_event.clear()
+
+        # Requested vs clamped (for UI)
+        req_az = float(az_target)
+        req_el = float(el_target)
+        az_target = _clamp(req_az, AZ_MIN, AZ_MAX)
+        el_target = _clamp(req_el, ELEVATION_MIN, ELEVATION_MAX)
+        was_clamped = (az_target != req_az) or (el_target != req_el)
+
         if update_callback:
-            update_callback({"busy": True})
+            update_callback(
+                {
+                    "busy": True,
+                    "req_az": req_az,
+                    "req_el": req_el,
+                    "clamped": was_clamped,
+                }
+            )
 
-        # Clamp targets early so timing and stored state match reality
-        az_target = _clamp(float(az_target), AZ_MIN, AZ_MAX)
-        el_target = _clamp(float(el_target), ELEVATION_MIN, ELEVATION_MAX)
-
+        # Current state
         az_current, el_current = RotorState.get_position()
         az_delta = az_target - az_current
         el_delta = el_target - el_current
         if az_delta == 0 and el_delta == 0:
+            msg = "No movement needed"
             if update_callback:
-                update_callback({"busy": False, "msg": "No movement needed"})
-            return "No movement needed"
+                update_callback(
+                    {
+                        "busy": False,
+                        "msg": msg,
+                        "req_az": req_az,
+                        "req_el": req_el,
+                        "clamped": was_clamped,
+                    }
+                )
+            return msg
 
+        # Speeds (+ elevation effective speed near stops)
         az_speed = _get_config_with_default("AZIMUTH_SPEED_DPS", 10.0)
-        el_speed = _get_config_with_default("ELEVATION_SPEED_DPS", 5.0)
+        el_dir = 1 if el_delta > 0 else (-1 if el_delta < 0 else 0)
+        el_speed_eff = _effective_el_speed(el_dir)
         sf = _safety()
 
-        az_time = abs(az_delta) / az_speed if az_speed > 0 else 0.0
-        el_time = abs(el_delta) / el_speed if el_speed > 0 else 0.0
+        # Timings (use effective elevation speed)
+        az_time = (abs(az_delta) / az_speed) if az_speed > 0 else 0.0
+        el_time = (abs(el_delta) / el_speed_eff) if el_speed_eff > 0 else 0.0
         az_time *= sf
         el_time *= sf
 
         az_dir = 1 if az_delta > 0 else (-1 if az_delta < 0 else 0)
-        el_dir = 1 if el_delta > 0 else (-1 if el_delta < 0 else 0)
 
         def progress(
             dt_both: float,
             dt_az_only: float,
             dt_el_only: float,
-        ) -> Tuple[float, float]:
+        ) -> tuple[float, float]:
             """Compute az/el degree progress given elapsed time on each phase."""
             paz = (az_dir * az_speed * dt_both) + (az_dir * az_speed * dt_az_only)
-            pel = (el_dir * el_speed * dt_both) + (el_dir * el_speed * dt_el_only)
+            pel = (el_dir * el_speed_eff * dt_both) + (el_dir * el_speed_eff * dt_el_only)
             return paz, pel
 
         partial_az = 0.0
         partial_el = 0.0
-        return_msg = "Move interrupted"  # default if canceled
+        return_msg = "Move interrupted"
 
         try:
+            # 1) Elevation breakaway kick if starting near a stop and moving away.
+            #    This time is intentionally NOT counted toward progress.
+            if el_dir != 0:
+                _breakaway_tilt(el_dir)
+                if _cancel_event.is_set():
+                    _stop_motor()
+                    RotorState.set_position(az_current, el_current)
+                    if update_callback:
+                        update_callback(
+                            {
+                                "busy": False,
+                                "msg": return_msg,
+                                "req_az": req_az,
+                                "req_el": req_el,
+                                "clamped": was_clamped,
+                            }
+                        )
+                    return return_msg
+
+            # 2) Axis-staggered motion
             if az_dir != 0 and el_dir != 0:
-                # Run both for the shorter time
                 first = min(az_time, el_time)
                 _pelco_move_axes(az_dir, el_dir)
                 slept = _sleep_with_cancel(first)
@@ -259,9 +376,9 @@ def send_command(
                     daz, delv = progress(slept, 0.0, 0.0)
                     partial_az += daz
                     partial_el += delv
+                    # Cancellation path: set cancel flag already => keep as-is
                     _stop_motor()
                 else:
-                    # Continue the longer axis only
                     if az_time > el_time:
                         _pelco_move_axes(az_dir, 0)
                         left = az_time - el_time
@@ -277,6 +394,7 @@ def send_command(
 
                     partial_az += daz
                     partial_el += delv
+                    # Normal completion: DO NOT set cancel flag
                     _stop_motor()
                     return_msg = f"Moved to az={az_target:.1f}, el={el_target:.1f}"
 
@@ -291,23 +409,48 @@ def send_command(
             else:
                 _pelco_move_axes(0, el_dir)
                 slept = _sleep_with_cancel(el_time)
-                partial_el += el_dir * el_speed * slept
+                partial_el += el_dir * el_speed_eff * slept
                 _stop_motor()
                 if slept >= el_time and not _cancel_event.is_set():
                     return_msg = f"Moved to az={az_target:.1f}, el={el_target:.1f}"
 
+            # 3) Optional approach normalization to hit EL=90° consistently
+            if not _cancel_event.is_set() and abs(el_target - 90.0) < 0.05:
+                overshoot = float(_get_config_with_default("EL_APPROACH_OVERSHOOT_DEG", 0.0))
+                if overshoot > 0:
+                    # approach from above: go up a tad, then down to 90
+                    _pelco_move_axes(0, +1)
+                    _sleep_with_cancel((overshoot / max(el_speed_eff, 1e-6)) * sf)
+                    _stop_motor()
+                    _pelco_move_axes(0, -1)
+                    _sleep_with_cancel((overshoot / max(el_speed_eff, 1e-6)) * sf)
+                    _stop_motor()
+
+            # 4) Optional extra overdrive at AZ=0 to firmly hit the mechanical zero
+            if not _cancel_event.is_set() and az_target == 0.0:
+                over = _get_config_with_default("ZERO_OVERDRIVE_SEC", 0.0)
+                if over > 0:
+                    _pelco_move_axes(-1, 0)
+                    _sleep_with_cancel(over)
+                    _stop_motor()
+
         finally:
-            # Compute final position: starting pos + actual progress (clamped)
+            # Final position: partials if canceled, else exact targets
             final_az = _clamp(az_current + partial_az, AZ_MIN, AZ_MAX)
             final_el = _clamp(el_current + partial_el, ELEVATION_MIN, ELEVATION_MAX)
-
-            # If not canceled, we consider the move completed to target
             if not _cancel_event.is_set():
                 final_az, final_el = az_target, el_target
-
             RotorState.set_position(final_az, final_el)
             if update_callback:
-                update_callback({"busy": False, "msg": return_msg})
+                update_callback(
+                    {
+                        "busy": False,
+                        "msg": return_msg,
+                        "req_az": req_az,
+                        "req_el": req_el,
+                        "clamped": was_clamped,
+                    }
+                )
 
         return return_msg
 
@@ -376,10 +519,11 @@ def set_azimuth_zero(update_callback: UpdateCallback = None) -> str:
     return send_command(0.0, el, update_callback=update_callback)
 
 
-def set_horizon(update_callback: UpdateCallback = None) -> str:
-    """Return elevation to 90 degrees (neutral/zenith), keeping current azimuth."""
+def set_elevation_neutral(update_callback: UpdateCallback = None) -> str:
+    """Go to UI neutral elevation: 90° in VERTICAL mode, 0° in HORIZONTAL mode."""
     az, _ = RotorState.get_position()
-    return send_command(az, 90.0, update_callback=update_callback)
+    ui_neutral = 0.0 if _el_mode() == "HORIZONTAL" else 90.0
+    return send_command(az, ui_neutral, update_callback=update_callback)
 
 
 # ------------------------- Calibration & tests (ticked) -------------------------
@@ -469,7 +613,12 @@ def calibrate(update_callback: UpdateCallback = None) -> str:
 
         # 1) Elevation down
         _pelco_move_axes(0, -1)
-        slept = _sleep_with_ticks(down_time, "moving fully down", elapsed, total_secs)
+        slept = _sleep_with_ticks(
+            down_time,
+            "moving fully down",
+            elapsed,
+            total_secs,
+        )
         elapsed += slept
         _stop_motor()
         if _cancel_event.is_set():
@@ -512,7 +661,8 @@ def calibrate(update_callback: UpdateCallback = None) -> str:
                         "msg": msg,
                         "cal_stage": "canceled",
                         "cal_progress": max(
-                            0.0, min(1.0, elapsed / total_secs if total_secs else 0.0)
+                            0.0,
+                            min(1.0, elapsed / total_secs if total_secs else 0.0),
                         ),
                     }
                 )
