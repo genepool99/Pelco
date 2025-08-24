@@ -1,6 +1,6 @@
 # Peltrack
 
-## A Pelco-D Rotor Controller with a modern Web UI (Ham radio friendly)
+## Pelco-D Rotor Controller for Amateur (Ham) Radio Operators
 
 Peltrack is a Python controller for Pelco-D pan/tilt rotors. It includes:
 
@@ -22,6 +22,8 @@ Peltrack is a Python controller for Pelco-D pan/tilt rotors. It includes:
 - Python 3.10+  
 - Pelco-D compatible rotor (RS-485)  
 - USB–RS485 adapter (e.g., CH340, FTDI)  
+
+---
 
 ### Install
 
