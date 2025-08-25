@@ -25,7 +25,7 @@ Most Pelco-D heads don’t report their absolute position. Peltrack uses time-ba
 
 ---
 
-### Install
+## 📥 Install
 
 ```bash
 python -m venv venv
