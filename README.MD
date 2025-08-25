@@ -11,7 +11,7 @@ Peltrack is a Python controller for Pelco-D pan/tilt rotors. It includes:
 - Optional elevation stiction handling (breakaway pulses) near mechanical stops  
 - Configurable mechanical limits and tunable motion parameters  
 
-> Note: Most Pelco-D heads don’t report their absolute position. Peltrack uses time-based (open-loop) control with calibrated speeds, safety factors, and optional “breakaway” pulses to be reliable in practice.
+Most Pelco-D heads don’t report their absolute position. Peltrack uses time-based (open-loop) control with calibrated speeds, safety factors, and optional “breakaway” pulses to be reliable in practice.
 
 ![Peltrack Web UI](assets/Screenshot.png)
 
@@ -85,18 +85,27 @@ python peltrack.py --port COM4 --baud 2400
 
 ## ⚙️ Configuration
 
-### `config.json` (saved by calibration / tunable at runtime)
+### `config.json` 
 
-Core:
+#### Core:
 ```json
 {
   "AZIMUTH_SPEED_DPS": 6.0,
   "ELEVATION_SPEED_DPS": 3.0,
-  "TIME_SAFETY_FACTOR": 0.985
+  "TIME_SAFETY_FACTOR": 0.985,
+  "EL_REFERENCE": "HORIZONTAL"
 }
 ```
+**AZIMUTH_SPEED_DPS** – Maximum azimuth (left/right rotation) speed of the rotor, measured in degrees per second. This value is used to calculate how long it takes to slew to a target heading.
 
-Calibration modal timing (for the backend calibration procedure):
+**ELEVATION_SPEED_DPS** – Maximum elevation (up/down tilt) speed of the rotor, in degrees per second. Controls timing and motion planning for vertical moves.
+
+**TIME_SAFETY_FACTOR** – A multiplier applied to all timing calculations (e.g. 0.985 = 98.5%). This adds a small buffer to prevent overshooting due to motor lag, inertia, or rounding errors.
+
+**EL_REFERENCE** – Defines what “zero elevation” means for this installation. For example, "HORIZONTAL" means 0° corresponds to the antenna pointing at the horizon (standard reference), whereas "VERTICAL" could mean 0° is straight up, depending on your mount.
+
+
+#### Calibration modal timing (for the backend calibration procedure):
 ```json
 {
   "CALIBRATE_DOWN_DURATION_SEC": 10,
@@ -104,8 +113,13 @@ Calibration modal timing (for the backend calibration procedure):
   "CALIBRATE_AZ_LEFT_DURATION_SEC": 40
 }
 ```
+**CALIBRATE_DOWN_DURATION_SEC**– Number of seconds the rotor should drive downward during calibration, ensuring it reaches the mechanical lower stop before establishing a baseline reference.
 
-Stiction & approach options (optional — useful when EL starts at a stop under load):
+**CALIBRATE_UP_TRAVEL_DEGREES** – How many degrees the rotor should travel upward from the lower stop to establish the full usable elevation range. For example, 90 means the controller assumes 90° of vertical movement between the bottom and top limits.
+
+**CALIBRATE_AZ_LEFT_DURATION_SEC** – Number of seconds the rotor should drive left (counter-clockwise) during calibration, ensuring it hits the mechanical azimuth limit and can map timing to the full 360° rotation range.
+
+#### Stiction & approach options (optional — useful when EL starts at a stop under load):
 ```json
 {
   "EL_NEAR_STOP_DEG": 8.0,
@@ -164,7 +178,6 @@ Define mechanical limits used by the UI and backend clamping:
 }
 ```
 
-> The web UI shows your request and whether it was clamped. Backend timing always uses clamped values.
 
 ---
 

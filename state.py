@@ -73,6 +73,7 @@ class RotorState:
         "EL_DOWN_NEAR_STOP_FACTOR": 0.95,
         "EL_APPROACH_OVERSHOOT_DEG": 0.0,
         "ZERO_OVERDRIVE_SEC": 0.0,
+        "EL_REFERENCE": "HORIZONTAL",
     }
     _CONFIG: Dict[str, Any] = _DEFAULT_CONFIG.copy()
 
@@ -126,10 +127,6 @@ class RotorState:
         with cls.lock:
             last = cls._LAST_REQUEST
             clamped = cls._LAST_WAS_CLAMPED
-
-        # Pylint-friendly guard: Optional[...] → check None, then unpack
-        if last is None:
-            return (None, None, False)
 
         req_az_raw, req_el_raw = last  # safe after None-check
 
