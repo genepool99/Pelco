@@ -119,34 +119,39 @@ Stiction & approach options (optional — useful when EL starts at a stop under 
 }
 ```
 **EL_NEAR_STOP_DEG** — Angular range near a mechanical stop (e.g., ±8°). Inside this zone, the rotor may behave differently due to load or stiction.
-```python
+
 Example: 8.0 → Consider the last 8° near the top/bottom as “special handling.”
-```
+
 
 **EL_BREAKAWAY_SEC_UP** — Extra pulse time when moving upward from a stop to overcome stiction.
+
 Example: 0.6 → Add a 0.6 s upward pulse at start, not counted toward timing.
 
 **EL_BREAKAWAY_SEC_DOWN** — Same as above but for downward moves.
+
 Example: 0.4 → Add a 0.4 s downward pulse when leaving a top stop.
 
 **EL_BREAKAWAY_SPEED_BYTE** — Speed byte (0–63) used during breakaway pulses.
+
 Example: 63 → Use maximum speed during the pulse.
 
 **EL_UP_NEAR_STOP_FACTOR** — Scale factor for elevation speed when moving upward near a stop. Helps avoid overshoot.
+
 Example: 0.90 → Use 90% of calibrated speed when within EL_NEAR_STOP_DEG.
 
 **EL_DOWN_NEAR_STOP_FACTOR** — Same, but for downward moves.
+
 Example: 0.95 → Use 95% of calibrated speed near a stop.
 
 **EL_APPROACH_OVERSHOOT_DEG** — Extra degrees to overshoot when approaching EL=90° (zenith), then settle back. Useful for heavy loads that sag.
+
 Example: 2.0 → Go 2° past 90, then return to 90.
 
 **ZERO_OVERDRIVE_SEC** — Extra leftward pulse time when returning to AZ=0. Helps “seat” the rotor against its mechanical zero.
+
 Example: 1.0 → Add a 1 second left pulse at azimuth zero.
 
-> All of the above are optional. If omitted, defaults are used.
-
-### `limits.json` (optional)
+### `limits.json` 
 
 Define mechanical limits used by the UI and backend clamping:
 
