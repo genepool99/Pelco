@@ -186,7 +186,7 @@ Define mechanical limits used by the UI and backend clamping:
 - Serialized: only one move runs at a time (global lock)  
 - Axis-staggered: both axes start; the shorter finishes first; the longer continues alone  
 - Cancel-aware: sleeps are chunked; STOP will halt between ticks and we record partial progress  
-- Open-loop: since most Pelco-D heads don’t report angle, we depend on calibrated °/s + safety factor  
+- Dead Reckoning: since most Pelco-D heads don’t report angle, we depend on calibrated °/s + safety factor  
 - Breakaway (optional): a short high-speed tilt pulse when leaving a stop, not counted in the target’s timing  
 - Re-zero (optional): an extra brief left pulse at AZ=0° requests to “seat” mechanical zero  
 
@@ -227,3 +227,4 @@ MIT — Provided “as is.” Use at your own risk.
 ## 👋 Credits
 
 Avi Solomon (AE7ET) - 2025
+[Project GitHub](https://github.com/genepool99/Peltrack)
