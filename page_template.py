@@ -280,7 +280,7 @@ HTML_PAGE = """
       </div>
     </div>
 
-    <div class="footer">Peltrack - Avi Solomon [AE7ET]</div>
+    <div class="footer"><a href="https://github.com/genepool99/Peltrack">Peltrack - Avi Solomon [AE7ET]</a></div>
   </div>
 
   <!-- Calibration Modal -->
